@@ -1,71 +1,50 @@
-# gitgg README
+# Gitgg: Simplified Branch Comparison
 
-This is the README for your extension "gitgg". After writing up a brief description, we recommend including the following sections.
+Gitgg is an essential tool for developers who need to quickly and intuitively compare files across different Git branches, all within Visual Studio Code.
+
+With just a single command, you can select a branch and view the exact differences between your local file and the version on the target branch, without needing complex terminal commands.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **File Comparison:** Select any file in the Explorer, the Source Control view (SCM), or the editor tab, and compare it with any other branch in your repository.
+- **"Working Tree" Detection:** When comparing a file with its own branch, if there are unsaved local changes, the extension will display the "Working Tree" label to indicate that the comparison is against the current working state. This prevents confusion and ensures you are always aware of uncommitted changes.
+- **Quick Access:** Use the right-click context menu on files and folders to start the comparison, or use the keyboard shortcut `Shift + \` for even faster access.
 
-For example if there is an image subfolder under your extension project workspace:
+### Demo
 
-\!\[feature X\]\(images/feature-x.png\)
+![](shortcut.png)
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+> Replace the empty link above with an image or GIF (like a .gif file) showing the extension in action. A GIF is highly recommended to demonstrate the workflow.
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+To use this extension, you must have:
+
+- Git installed and configured on your system.
+- A project with an initialized Git repository.
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+This extension does not add any customizable settings.
 
 ## Known Issues
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+Currently, the extension supports comparing only one file at a time. The functionality for comparing multiple files is being improved for future versions.
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
+### 0.0.1
 
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
+- Initial release of Gitgg.
+- Functionality for comparing a single file between Git branches.
+- Quick access via context menu and `Shift + \` keyboard shortcut.
+- Automatic "Working Tree" detection for local changes.
 
 ---
 
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
 ## For more information
 
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
+- [Visual Studio Code's Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
+- [Git Documentation](https://git-scm.com/doc)
 
 **Enjoy!**
