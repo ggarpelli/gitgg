@@ -1,50 +1,73 @@
-# Gitgg: Simplified Branch Comparison
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ggarpelli/gitgg/master/images/banner.png" alt="Gitgg Banner">
+</p>
 
-Gitgg is an essential tool for developers who need to quickly and intuitively compare files across different Git branches, all within Visual Studio Code.
+<p align="center">
+    <a href="https://marketplace.visualstudio.com/items?itemName=ggarpelli.GuilhermeGarpelli">
+        <img src="https://img.shields.io/visual-studio-marketplace/v/ggarpelli.GuilhermeGarpelli?style=for-the-badge&logo=visualstudiocode&label=VS%20Marketplace&color=blue" alt="Version">
+    </a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=ggarpelli.GuilhermeGarpelli">
+        <img src="https://img.shields.io/visual-studio-marketplace/i/ggarpelli.GuilhermeGarpelli?style=for-the-badge&color=green" alt="Installs">
+    </a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=ggarpelli.GuilhermeGarpelli&ssr=false#review-details">
+        <img src="https://img.shields.io/visual-studio-marketplace/r/ggarpelli.GuilhermeGarpelli?style=for-the-badge&color=purple" alt="Rating">
+    </a>
+</p>
 
-With just a single command, you can select a branch and view the exact differences between your local file and the version on the target branch, without needing complex terminal commands.
+# Gitgg: Simplified Git Branch Comparison
 
-## Features
+Tired of complex commands just to see the difference between file versions on other branches? **Gitgg** is your essential tool for a quick and intuitive file comparison experience, directly inside VS Code.
 
-- **File Comparison:** Select any file in the Explorer, the Source Control view (SCM), or the editor tab, and compare it with any other branch in your repository.
-- **"Working Tree" Detection:** When comparing a file with its own branch, if there are unsaved local changes, the extension will display the "Working Tree" label to indicate that the comparison is against the current working state. This prevents confusion and ensures you are always aware of uncommitted changes.
-- **Quick Access:** Use the right-click context menu on files and folders to start the comparison, or use the keyboard shortcut `Shift + \` for even faster access.
+With just a couple of clicks, you can select one or more files and instantly diff them against any local branch in your repository.
 
-### Demo
+## ✨ Features
 
-![](shortcut.png)
+-   **🔎 Flexible File Comparison**: Instantly compare a single file or a selection of multiple files against any branch. The extension handles it all seamlessly.
 
-> Replace the empty link above with an image or GIF (like a .gif file) showing the extension in action. A GIF is highly recommended to demonstrate the workflow.
+-   **🌳 "Working Tree" Awareness**: When comparing a file against its own branch, Gitgg intelligently detects uncommitted changes and labels your version as the `(Working Tree)`, so you always know what you're looking at.
 
-## Requirements
+-   **🚀 Quick & Easy Access**: No need to leave your editor. Access the compare feature directly from the right-click context menu in the File Explorer or on the editor tab. For even faster access, use the `Shift + \` keyboard shortcut.
 
-To use this extension, you must have:
+## 🎬 Demo in Action
 
-- Git installed and configured on your system.
-- A project with an initialized Git repository.
+### Comparing a Single File
+Quickly see the changes between your current file and its version on another branch.
 
-## Extension Settings
+![Animation showing single file comparison](https://raw.githubusercontent.com/ggarpelli/gitgg/master/images/demo1.gif)
+
+### Comparing Multiple Files
+Select several files at once and compare them simultaneously—ideal for reviewing bigger changes.
+
+![Animation showing multi-file comparison](https://raw.githubusercontent.com/ggarpelli/gitgg/master/images/demo2.gif)
+
+### Quick Access Shortcut
+Use the context menu or the `Shift + \` shortcut to start a comparison instantly.
+
+![](images/shortcut.png)
+
+
+## ✅ Requirements
+
+-   Git must be installed and configured on your system.
+-   You must be working inside a project with an initialized Git repository.
+
+## ⚙️ Extension Settings
 
 This extension does not add any customizable settings.
 
-## Known Issues
+## 릴 Release Notes
 
-Currently, the extension supports comparing only one file at a time. The functionality for comparing multiple files is being improved for future versions.
-
-## Release Notes
+### 0.0.3
+- **NEW:** Added functionality to compare multiple files between branches simultaneously.
+- Improved the logic for detecting selected files from different contexts within VS Code (Explorer, SCM, active editor).
+- Optimized the process for checking and fetching remote branches.
 
 ### 0.0.1
-
 - Initial release of Gitgg.
 - Functionality for comparing a single file between Git branches.
 - Quick access via context menu and `Shift + \` keyboard shortcut.
 - Automatic "Working Tree" detection for local changes.
 
 ---
-
-## For more information
-
-- [Visual Studio Code's Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-- [Git Documentation](https://git-scm.com/doc)
 
 **Enjoy!**

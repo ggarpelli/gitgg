@@ -3,29 +3,41 @@ import simpleGit, { SimpleGitOptions } from 'simple-git';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { createHash } from 'crypto';
 
 export function activate(context: vscode.ExtensionContext) {
 
-    let disposable = vscode.commands.registerCommand('gitgg.compareFile', async (...args: any[]) => {
+    let disposable = vscode.commands.registerCommand('gitgg.compareFile', 
+        async (...args: any[]) => {
 
-        let uri: vscode.Uri | undefined;
+        let urisToCompare: vscode.Uri[] = [];
+
+        // Logic to detect multiple files from different contexts
+        if (args.length > 0) {
+            if (Array.isArray(args[1]) && args[1].length > 0) {
+                urisToCompare = args[1]; // Multi-select from Explorer
+            }
+            else if (args[0]) {
+                const uri = args[0].resourceUri ? args[0].resourceUri : args[0]; // Single-select from SCM or Explorer
+                if (uri instanceof vscode.Uri) {
+                    urisToCompare = [uri];
+                }
+            }
+        }
         
-        // Simplified logic to get a single URI
-        if (args.length > 0 && args[0] && args[0].resourceUri) {
-            uri = args[0].resourceUri;
-        } else if (vscode.window.activeTextEditor) {
-            uri = vscode.window.activeTextEditor.document.uri;
+        // Fallback for command palette or keybinding
+        if (urisToCompare.length === 0 && vscode.window.activeTextEditor) {
+            urisToCompare.push(vscode.window.activeTextEditor.document.uri);
         }
 
-        if (!uri) {
-            vscode.window.showErrorMessage('No valid file or folder selected for comparison.');
+        if (urisToCompare.length === 0) {
+            vscode.window.showErrorMessage('No valid file selected for comparison.');
             return;
         }
-
-        const repoPath = vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+        
+        const firstUri = urisToCompare[0];
+        const repoPath = vscode.workspace.getWorkspaceFolder(firstUri)?.uri.fsPath;
         if (!repoPath) {
-            vscode.window.showErrorMessage('Error: The selected file is not in a Git repository workspace.');
+            vscode.window.showErrorMessage('Error: The selected file(s) are not in a Git workspace.');
             return;
         }
         
@@ -38,7 +50,6 @@ export function activate(context: vscode.ExtensionContext) {
         const git = simpleGit(options);
 
         try {
-            // FIX: Removed the 'root' argument
             const isRepo = await git.checkIsRepo();
             if (!isRepo) {
                 vscode.window.showErrorMessage('Error: The open folder is not a Git repository.');
@@ -55,85 +66,76 @@ export function activate(context: vscode.ExtensionContext) {
             }));
 
             const selectedItem = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a branch to compare...'
+                placeHolder: `Compare ${urisToCompare.length} file(s) with branch...`
             });
 
             if (!selectedItem) {
-                return;
+                return; // User cancelled
             }
 
             const selectedBranch = selectedItem.label;
             
-            let remoteBranchExists = false;
+            let comparisonSource = selectedBranch;
             try {
-                const remotes = await git.getRemotes(true);
-                const remoteNames = remotes.map(r => r.name);
-                
-                if (remoteNames.length > 0) {
-                    const branchSummary = await git.branch(['--remotes', '--list', `origin/${selectedBranch}`]);
-                    if (branchSummary.branches[`origin/${selectedBranch}`]) {
-                        remoteBranchExists = true;
-                    }
+                const remoteBranchExists = (await git.branch(['-r'])).all.some(b => b.endsWith(`/${selectedBranch}`));
+
+                if (remoteBranchExists) {
+                    vscode.window.showInformationMessage(`Fetching updates for remote branch '${selectedBranch}'...`);
+                    await git.fetch();
+                    comparisonSource = `origin/${selectedBranch}`;
+                } else {
+                    vscode.window.showInformationMessage(`Branch '${selectedBranch}' does not exist on the remote. Comparing with the local version.`);
                 }
             } catch (error) {
-                remoteBranchExists = false;
+                // Ignore fetch errors
             }
 
-            let comparisonSource: string;
+            // Loop to process each selected file
+            for (const uri of urisToCompare) {
+                try {
+                    const filePath = uri.fsPath;
+                    const relativePath = path.relative(repoPath, filePath).replace(/\\/g, '/');
 
-            if (remoteBranchExists) {
-                vscode.window.showInformationMessage(`Fetching latest updates for remote branch '${selectedBranch}'...`);
-                await git.fetch('origin', selectedBranch);
-                comparisonSource = `origin/${selectedBranch}`;
-            } else {
-                vscode.window.showInformationMessage(`Branch '${selectedBranch}' does not exist on the remote. Comparing with the local version.`);
-                comparisonSource = selectedBranch;
-            }
+                    let fileContent;
+                    try {
+                        fileContent = await git.show([`${comparisonSource}:${relativePath}`]);
+                    } catch (error: any) {
+                        if (error.message.includes('fatal: path') || error.message.includes('fatal: bad object')) {
+                            fileContent = '';
+                        } else {
+                            vscode.window.showWarningMessage(`Could not get content of '${relativePath}' from branch '${selectedBranch}'. Skipping...`);
+                            continue; 
+                        }
+                    }
+                    
+                    let currentFileLabel = `(${currentBranch})`;
+                    if (selectedBranch === currentBranch) {
+                        const status = await git.status();
+                        const isModified = status.modified.some(file => path.join(repoPath, file) === filePath);
+                        
+                        if (isModified) {
+                            currentFileLabel = `(Working Tree)`;
+                        }
+                    }
 
-            const filePath = uri.fsPath;
-            const relativePath = path.relative(repoPath, filePath).replace(/\\/g, '/');
+                    const tempDir = os.tmpdir();
+                    const tempFileName = `gitgg-${path.basename(filePath)}-${Date.now()}`;
+                    const tempFilePath = path.join(tempDir, tempFileName);
+                    fs.writeFileSync(tempFilePath, fileContent);
 
-            let fileContent;
-            try {
-                fileContent = await git.show([`${comparisonSource}:${relativePath}`]);
-            } catch (error: any) {
-                if (error.message.includes('fatal: path') || error.message.includes('fatal: bad object')) {
-                    fileContent = '';
-                } else {
-                    vscode.window.showErrorMessage(`An error occurred while getting file content: ${error.message}`);
-                    return;
+                    const tempUri = vscode.Uri.file(tempFilePath);
+                    
+                    await vscode.commands.executeCommand(
+                        'vscode.diff',
+                        tempUri,
+                        uri,
+                        `Comparing ${path.basename(filePath)} (${selectedBranch}) ↔ ${currentFileLabel}`,
+                        { preview: false }
+                    );
+                } catch (innerError: any) {
+                    vscode.window.showErrorMessage(`Error comparing file ${path.basename(uri.fsPath)}: ${innerError.message}`);
                 }
             }
-            
-            // Enhanced label logic using Git status
-            let currentFileLabel = `(${currentBranch})`;
-            if (selectedBranch === currentBranch) {
-                const status = await git.status();
-                const hasLocalChanges = status.modified.includes(relativePath);
-                
-                if (hasLocalChanges) {
-                    currentFileLabel = `(Working Tree)`;
-                }
-            }
-
-            const tempDir = os.tmpdir();
-            const tempFilePath = path.join(tempDir, `gitgg-${path.basename(filePath)}-${Date.now()}`);
-            fs.writeFileSync(tempFilePath, fileContent);
-
-            const tempUri = vscode.Uri.file(tempFilePath);
-            const currentUri = vscode.Uri.file(filePath);
-
-            await vscode.commands.executeCommand(
-                'vscode.diff',
-                tempUri,
-                currentUri,
-                `Comparing ${path.basename(filePath)} (${selectedBranch}) ↔ ${currentFileLabel}`,
-                {
-                    label1: `${path.basename(filePath)} (${selectedBranch})`,
-                    label2: `${path.basename(filePath)} ${currentFileLabel}`,
-                    preview: false
-                }
-            );
 
         } catch (error: any) {
             vscode.window.showErrorMessage(`An error occurred: ${error.message}`);
@@ -141,8 +143,4 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(disposable);
-}
-
-function hashContent(content: string): string {
-    return createHash('sha1').update(content).digest('hex');
 }
