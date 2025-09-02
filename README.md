@@ -43,7 +43,7 @@ Select several files at once and compare them simultaneously—ideal for reviewi
 ### Quick Access Shortcut
 Use the context menu or the `Shift + \` shortcut to start a comparison instantly.
 
-![](images/shortcut.png)
+![](https://raw.githubusercontent.com/ggarpelli/gitgg/master/images/shortcut.png)
 
 
 ## ✅ Requirements
@@ -55,7 +55,11 @@ Use the context menu or the `Shift + \` shortcut to start a comparison instantly
 
 This extension does not add any customizable settings.
 
-## 릴 Release Notes
+## Release Notes
+
+### 0.0.6 (Latest)
+- **🚀 Major Performance & Stability Overhaul**: Implemented Webpack to bundle the extension, drastically reducing the package size for faster downloads and installation.
+- **UI Improvement**: Added progress notifications for long-running Git operations, improving user feedback on large repositories.
 
 ### 0.0.4
 - **NEW:** Added functionality to compare multiple files between branches simultaneously.

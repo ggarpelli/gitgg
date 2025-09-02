@@ -1,24 +1,27 @@
-# Ignore a pasta de configurações do workspace
-.vscode/**
+# Git repository folder
+.git/**
 
-# Ignore as pastas e arquivos de teste
-.vscode-test/**
-test/**
-out/test/**
+# Project assets that are hosted on GitHub
+images/**
 
-# Ignore a pasta do código-fonte TypeScript
-src/**
+# Dependencies
+node_modules/
 
-# Ignore arquivos de configuração e de versionamento
-.github/**
-.gitignore
-vsc-extension-quickstart.md
-tsconfig.json
+# Source and old build folders
+src/
+out/
+
+# VS Code specific folders
+.vscode/
+.vscode-test/
+test/
+
+# Configuration files
 webpack.config.js
-*.map
+tsconfig.json
 yarn.lock
 package-lock.json
-.eslintrc.json
-
-# Ignore o pacote gerado
+.gitignore
 *.vsix
+*.map
+.eslintrc.json
