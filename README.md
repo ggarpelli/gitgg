@@ -55,24 +55,9 @@ Use the context menu or the `Shift + \` shortcut to start a comparison instantly
 
 This extension does not add any customizable settings.
 
-## Release Notes
+## Release History
 
-### 0.0.6 (Latest)
-- **🚀 Major Performance & Stability Overhaul**: Implemented Webpack to bundle the extension, drastically reducing the package size for faster downloads and installation.
-- **UI Improvement**: Added progress notifications for long-running Git operations, improving user feedback on large repositories.
-
-### 0.0.4
-- **NEW:** Added functionality to compare multiple files between branches simultaneously.
-- Improved the logic for detecting selected files from different contexts within VS Code (Explorer, SCM, active editor).
-- Optimized the process for checking and fetching remote branches.
-
-### 0.0.2
--   🎨 Updated the extension logo and fixed minor visual details.
-
-### 0.0.1
-- Initial release of Gitgg.
-- Functionality for comparing a single file between Git branches.
-- Automatic "Working Tree" detection for local changes.
+For a detailed list of all changes, please see the [CHANGELOG.md](CHANGELOG.md) file.
 
 ---
 
