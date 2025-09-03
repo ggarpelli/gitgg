@@ -22,6 +22,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             let urisToCompare: vscode.Uri[] = [];
 
+            // Logic to detect single or multiple selected files
             if (args.length > 0) {
                 if (Array.isArray(args[1]) && args[1].length > 0) {
                     urisToCompare = args[1];
@@ -79,7 +80,26 @@ export function activate(context: vscode.ExtensionContext) {
 
                 const targetBranch = selectedItem.label;
 
-                progress.report({ increment: 50, message: `Comparing with branch '${targetBranch}'...` });
+                // Robust fetch logic with user feedback
+                progress.report({ increment: 50, message: `Checking remote for branch '${targetBranch}'...` });
+                let comparisonSource = targetBranch; // Default to local branch
+
+                try {
+                    const remotes = await git.getRemotes();
+                    const hasOrigin = remotes.some(r => r.name === 'origin');
+                    
+                    if (hasOrigin) {
+                        progress.report({ increment: 60, message: `Fetching updates for '${targetBranch}' from origin...` });
+                        await git.fetch('origin', targetBranch);
+                        // After fetching, we compare against the remote-tracking branch
+                        comparisonSource = `origin/${targetBranch}`;
+                    }
+                } catch (error: any) {
+                    // If fetch fails, inform the user and proceed with the local version
+                    vscode.window.showWarningMessage(`Could not fetch updates for '${targetBranch}'. Comparing against the local version, which may be outdated.`);
+                }
+                
+                progress.report({ increment: 75, message: `Comparing files...` });
                 
                 let processed = 0;
                 // Loop to process each file and open a native diff tab
@@ -87,10 +107,11 @@ export function activate(context: vscode.ExtensionContext) {
                     if (token.isCancellationRequested) { break; }
                     
                     processed++;
-                    progress.report({ increment: 50 + (processed / urisToCompare.length * 50), message: `Comparing ${path.basename(uri.fsPath)}...` });
+                    progress.report({ increment: 75 + (processed / urisToCompare.length * 25), message: `Comparing ${path.basename(uri.fsPath)}...` });
                     
                     const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
-                    const fileContent = await git.show([`${targetBranch}:${relativePath}`]).catch(() => '');
+                    // Use 'comparisonSource' which could be the remote branch (e.g., 'origin/main')
+                    const fileContent = await git.show([`${comparisonSource}:${relativePath}`]).catch(() => '');
 
                     const tempDir = os.tmpdir();
                     const tempFileName = `gitgg-${path.basename(uri.fsPath)}-${Date.now()}`;

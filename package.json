@@ -2,7 +2,7 @@
     "name": "GuilhermeGarpelli",
     "displayName": "Gitgg - Branch File Diff",
     "description": "A Extension for comparing files across different Git branches.",
-    "version": "0.0.7",
+    "version": "0.0.9",
     "publisher": "ggarpelli",
     "icon": "icon.png",
     "repository": {
@@ -20,8 +20,8 @@
     ],
     "main": "./dist/extension.js",
     "files": [
-         "dist",
-         "icon.png"
+       "dist",
+       "icon.png"
      ],
     "contributes": {
         "commands": [
@@ -67,21 +67,15 @@
     "scripts": {
         "vscode:prepublish": "npm run webpack",
         "webpack": "webpack --mode production",
-        "webpack-dev": "webpack --mode development --watch",
-        "compile": "tsc -p ./",
-        "test": "node ./out/test/runTest.js"
+        "webpack-dev": "webpack --mode development --watch"
     },
     "devDependencies": {
-        "@types/diff": "^5.0.9",
         "@types/glob": "^8.1.0",
-        "@types/hogan.js": "^3.0.5",
         "@types/mocha": "^10.0.1",
         "@types/node": "16.x",
         "@types/vscode": "^1.81.0",
         "@types/webpack-env": "^1.18.4",
         "@vscode/test-electron": "^2.3.2",
-        "diff": "^5.2.0",
-        "diff2html": "^3.4.47",
         "simple-git": "^3.19.1",
         "ts-loader": "^9.5.1",
         "typescript": "^5.1.3",
