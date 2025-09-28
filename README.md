@@ -28,6 +28,8 @@ With just a couple of clicks, you can select one or more files and instantly dif
 
 -   **🚀 Quick & Easy Access**: No need to leave your editor. Access the compare feature directly from the right-click context menu in the File Explorer or on the editor tab. For even faster access, use the `Shift + \` keyboard shortcut.
 
+-   **⚡ Optimized Multi-File Webview**: Custom Webview using `diff2html` to display all changes in a cohesive, visually appealing format.
+
 ## 🎬 Demo in Action
 
 ### Comparing a Single File

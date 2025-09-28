@@ -183,15 +183,32 @@ async function runWebviewDiffComparison(context: vscode.ExtensionContext, progre
 
     if (token.isCancellationRequested) return;
 
-    // Separate changed and unchanged files
-    const changedFiles = filesData.filter(f => !f.noChanges);
-    const unchangedFiles = filesData.filter(f => f.noChanges);
+    // === Ordening the files: ADDED -> CHANGED -> UNCHANGED ===
+    const addedFiles = filesData
+        .filter(f => status.not_added.includes(f.filePath))
+        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+
+    const changedFilesOnly = filesData
+        .filter(f => !status.not_added.includes(f.filePath) && !f.noChanges)
+        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+
+    const unchangedFilesOnly = filesData
+        .filter(f => f.noChanges)
+        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+
+    const changedFiles = [...addedFiles, ...changedFilesOnly];
+    const unchangedFiles = unchangedFilesOnly;
 
     const fileCountText = `(${urisToCompare.length} files)`;
+    const singleFileName = urisToCompare.length === 1 ? path.basename(urisToCompare[0].fsPath) : null;
+
+    const panelTitle = urisToCompare.length === 1
+        ? `Changes in ${singleFileName} (${targetBranch} ↔ ${localFileLabel})`
+        : `Changes between (${targetBranch}) ↔ (${localFileLabel}) ${fileCountText}`;
 
     const panel = vscode.window.createWebviewPanel(
         'gitgg-diff-summary',
-        `Changes between (${targetBranch}) ↔ (${localFileLabel}) ${fileCountText}`,
+        panelTitle,
         vscode.ViewColumn.One,
         { enableScripts: true, retainContextWhenHidden: true }
     );
@@ -212,7 +229,7 @@ async function runWebviewDiffComparison(context: vscode.ExtensionContext, progre
 
             const tempFilePath = path.join(os.tmpdir(), `gitgg-${path.basename(msg.path)}-${Date.now()}`);
             fs.writeFileSync(tempFilePath, tempContent);
-            await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(tempFilePath), fileUri, `Comparing ${msg.path} (${targetBranch}) ↔ (${localFileLabel})`, { preview: false });
+            await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(tempFilePath), fileUri, `Comparing ${path.basename(msg.path)} (${targetBranch}) ↔ (${localFileLabel})`, { preview: false });
         }
     });
 
@@ -266,12 +283,12 @@ body { background-color: var(--vscode-editor-background); color: var(--vscode-ed
 .d2h-file-header { background-color: var(--vscode-sideBar-background); border-bottom: 1px solid var(--vscode-sideBar-border); padding: 5px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
 .d2h-file-wrapper { border: 1px solid var(--vscode-sideBar-border); margin-bottom: 1em; border-radius: 5px; }
 .d2h-files-diff { position: inherit; }
-.d2h-ins { background-color: var(--vscode-diffEditor-insertedTextBackground); }
-.d2h-del { background-color: var(--vscode-diffEditor-removedTextBackground); }
-.d2h-code-line-ctn, .d2h-code-side-line, .d2h-file-diff, .d2h-files-diff { border-color: var(--vscode-sideBar-border, #333); }
 .status-button { margin-left: 6px; padding: 1px 4px; font-size: 0.75em; cursor: pointer; background-color: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 2px; }
 .status-button:hover { background-color: var(--vscode-button-hoverBackground); }
-.status-tag { font-size: 0.8em; font-weight: bold; color: gray; }
+.status-badge { font-size: 0.8em; font-weight: bold; margin-left: 6px; }
+.status-added { color: #4caf50; } /* green for additions */
+.status-removed { color: #f44336; } /* red for deletions */
+.status-unchanged { color: gray; }
 </style>
 </head>
 <body>
@@ -282,7 +299,22 @@ const diffContainer = document.getElementById('diff-container');
 const changedFiles = ${changedJson};
 const unchangedFiles = ${unchangedJson};
 
-// Render files helper
+// Helper to extract only the file name
+function getFileName(filePath) { return filePath.split('/').pop(); }
+
+// Helper: calculate added/removed lines
+function getLineChanges(patch){
+    if(!patch) return { added: 0, removed: 0 };
+    const lines = patch.split('\\n');
+    let added = 0, removed = 0;
+    lines.forEach(line => {
+        if(line.startsWith('+') && !line.startsWith('+++')) added++;
+        if(line.startsWith('-') && !line.startsWith('---')) removed++;
+    });
+    return { added, removed };
+}
+
+// Render files
 function renderFiles(files, isUnchanged=false){
     files.forEach(file => {
         const fileWrapper = document.createElement('div');
@@ -300,23 +332,23 @@ function renderFiles(files, isUnchanged=false){
             context: file.patch ? Math.min(500, file.patch.split('\\n').length) : 100
         };
 
+        const lineChanges = getLineChanges(file.patch);
+
         if(isUnchanged){
             const header = document.createElement('div');
             header.className = 'd2h-file-header unchanged';
             header.innerHTML = \`
                 <div style="display: flex; gap: 4px; align-items: center;">
-                    <span class="d2h-file-name">\${file.filePath}</span>
+                    <span class="d2h-file-name">\${getFileName(file.filePath)}</span>
                     <button class="status-button">View full Diff</button>
                 </div>
-                <span class="status-tag">UNCHANGED</span>
+                <span class="status-badge status-unchanged">UNCHANGED</span>
             \`;
             fileWrapper.appendChild(header);
-
             const btn = header.querySelector('button.status-button');
             btn.addEventListener('click', () => {
                 vscode.postMessage({ command: 'openDiff', path: file.filePath });
             });
-
         } else {
             const patch = file.patch || '';
             const diff2htmlUi = new Diff2HtmlUI(fileWrapper, patch, configuration);
@@ -324,6 +356,24 @@ function renderFiles(files, isUnchanged=false){
 
             const viewedHeader = fileWrapper.querySelector('.d2h-file-header .d2h-file-name');
             if(viewedHeader){
+                viewedHeader.textContent = getFileName(file.filePath);
+
+                // Only show badges for changed files, NOT new files
+                if(!file.noChanges && lineChanges.added + lineChanges.removed > 0){
+                    if(lineChanges.added > 0){
+                        const addedBadge = document.createElement('span');
+                        addedBadge.className = 'status-badge status-added';
+                        addedBadge.textContent = \`+\${lineChanges.added}\`;
+                        viewedHeader.parentNode.appendChild(addedBadge);
+                    }
+                    if(lineChanges.removed > 0){
+                        const removedBadge = document.createElement('span');
+                        removedBadge.className = 'status-badge status-removed';
+                        removedBadge.textContent = \`-\${lineChanges.removed}\`;
+                        viewedHeader.parentNode.appendChild(removedBadge);
+                    }
+                }
+
                 const btn = document.createElement('button');
                 btn.textContent = 'View full Diff';
                 btn.className = 'status-button';
@@ -336,6 +386,7 @@ function renderFiles(files, isUnchanged=false){
     });
 }
 
+// Render changed files first, then unchanged
 renderFiles(changedFiles);
 renderFiles(unchangedFiles, true);
 </script>

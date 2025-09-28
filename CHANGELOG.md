@@ -12,25 +12,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - ✨ Add the ability to favorite branches (⭐️) for quicker access in the selection list.
 
+--- 
+
+## [0.1.0] - 2025-09-28
+
+### Changed
+- **🎨 Webview Report Enhancements**: Files in the multi-file Webview are now ordered as ADDED → CHANGED → UNCHANGED. UNCHANGED files stay at the bottom with a gray badge; added/removed badges use green/red colors for clarity. Single-file comparisons now show the filename in the panel title.
+
+- **⚡ Improved Multi-File Comparison UI**: Only changed files display added/removed line badges. Helper functions were added for calculating line changes and extracting filenames to clean up Webview rendering.
+
+- **🖌️ Visual Improvements**: Badge styling improved for added (green), removed (red), and unchanged (gray) files.
+
 ---
 
 ## [0.0.10] - 2025-09-27
 
 ### Added
-- ✨ Single-Page Webview Report (Multi-File Comparison): Implemented the core functionality to compare multiple files simultaneously within a single dedicated Webview panel inside VS Code.
+- **✨ Single-Page Webview Report (Multi-File Comparison)**: Added the ability to compare multiple files at once within a single, dedicated Webview panel in VS Code.
 
-- The report uses the diff2html library to render Git patches cohesively, visually appealingly, and integrated with the current VS Code theme.
+- **🔍 Cohesive Diff Rendering**: Utilizes the diff2html library to display Git patches in a clean, visually appealing format fully integrated with the current VS Code theme.
 
-- Added a "View full Diff" button for each changed file in the Webview, allowing the user to quickly open the native VS Code diff for that specific comparison.
+- **🖱️ Quick Diff Access**: Each changed file includes a "View full Diff" button, enabling users to instantly open the native VS Code diff for that specific file.
 
-- Implemented special handling for untracked files, correctly generating their diff against /dev/null and displaying them in the report.
+- **⚙️ Untracked File Support**: New files are properly handled by generating diffs against /dev/null, ensuring they appear correctly in the report.
 
 ### Changed
-- 🎨 Smart Display Logic: The extension now prompts the user, when selecting more than one file, whether they want to compare them in "Separate Tabs" (separate native comparisons) or in a "Single View" (the new Webview report).
+- **🎨 Smart Display Logic**: The extension now prompts the user, when selecting more than one file, whether they want to compare them in "Separate Tabs" (separate native comparisons) or in a "Single View" (the new Webview report).
 
-- ⚙️ Enhanced File Selection: The logic for extracting file URIs from the VS Code arguments was completely reworked to remove duplicates and be more robust, ensuring correct counting (single vs. multi-file) in all contexts (Explorer, Editor, etc.).
+- **⚙️ Enhanced File Selection**: The logic for extracting file URIs from the VS Code arguments was completely reworked to remove duplicates and be more robust, ensuring correct counting (single vs. multi-file) in all contexts (Explorer, Editor, etc.).
 
-- ⚙️ Optimized "Working Tree" Logic: The "Working Tree" label is now applied if there are modified or untracked (not_added) files among the selected ones, ensuring new files are correctly identified as local changes.
+- **⚙️Optimized "Working Tree" Logic**: The "Working Tree" label is now applied if there are modified or untracked (not_added) files among the selected ones, ensuring new files are correctly identified as local changes.
 
 ---
 
