@@ -3,6 +3,8 @@
 'use strict';
 
 const path = require('path');
+// Import the copy plugin.
+const CopyPlugin = require('copy-webpack-plugin');
 
 /**@type {import('webpack').Configuration}*/
 const config = {
@@ -34,6 +36,14 @@ const config = {
       },
     ],
   },
+  // Configure the plugin to copy the 'webview' folder.
+  plugins: [
+    new CopyPlugin({
+        patterns: [
+            { from: 'src/webview', to: 'webview' } // Copies from 'src/webview' to 'dist/webview'
+        ]
+    })
+  ],
   devtool: 'source-map',
 };
 module.exports = config;

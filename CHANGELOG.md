@@ -11,8 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - ✨ Add the ability to favorite branches (⭐️) for quicker access in the selection list.
+- 🚀 Add the ability to stage or revert changes for each file directly from the multi-file comparison view.
 
---- 
+### Fixed
+- 🐛 Fixed a visual bug in the multi-file report where line numbers would overlap the code during horizontal scrolling.
+
+---
+
+## [0.1.2] - 2025-10-01
+
+### Added
+- 📂 **Folder Comparison**: You can now select and compare entire folders. The extension will find all files within them and show a complete diff report.
+
+### Changed
+- 🎨 **Complete Webview Overhaul**: The multi-file comparison report has been redesigned for clarity and better organization.
+- 📊 **Comparison Summary**: The report now starts with a high-level summary showing the total number of added, changed, and deleted files.
+- 🗂️ **Categorized File Lists**: Files are now grouped by their status (Added, Changed, Deleted, Unchanged) to make reviewing changes easier.
+- ⚙️ **Enhanced Workspace Detection**: Improved logic for finding the Git repository, adding better support for multi-root workspaces.
+- 🧠 **Smarter Multi-File Handling**: The extension now provides a more intelligent workflow. It will only ask for your preference (separate tabs vs. single view) when comparing 2-5 files. For 6 or more files, it automatically opens the single view report to optimize performance and usability.
+- 🏗️ **Professional Code Refactoring**: The extension's internal structure has been completely reorganized for better performance and maintainability. The Webview's HTML, CSS, and JavaScript are now separated into dedicated files, following VS Code best practices.
+
+### Fixed
+- 🐛 **Correct Diff for Deleted Files**: Fixed a major bug where comparing a single deleted file would show an incorrect diff. It now correctly shows the file's previous content against a deleted state.
+- 🏷️ **Accurate 'Working Tree' Label**: The `(Working Tree)` label now correctly appears when comparing against the current branch if a selected file has been changed or deleted locally.
+
+---
 
 ## [0.1.0] - 2025-09-28
 

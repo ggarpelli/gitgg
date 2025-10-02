@@ -1,16 +1,62 @@
 import * as vscode from 'vscode';
-import simpleGit, { SimpleGitOptions } from 'simple-git';
+import simpleGit, { SimpleGit, SimpleGitOptions, StatusResult } from 'simple-git';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 
-// Define the type for our comparison modes
+// Defines the two possible modes for displaying diffs.
 type ComparisonMode = 'separate' | 'singleView';
 
+// Defines the data structure for a file being compared.
+interface FileData {
+    filePath: string;
+    patch: string | null;
+    noChanges: boolean;
+    isNewInDiff?: boolean;
+    isDeletedInDiff?: boolean;
+}
+
+/**
+ * Resolves a list of user-selected URIs (which can be files or directories)
+ * into a flat list of file URIs.
+ * @param uris The initial list of URIs from the user's selection.
+ * @returns A promise that resolves to a flat array of file URIs.
+ */
+async function resolveUrisToFiles(uris: vscode.Uri[]): Promise<vscode.Uri[]> {
+    const fileUris: Set<vscode.Uri> = new Set();
+
+    for (const uri of uris) {
+        try {
+            const stat = await vscode.workspace.fs.stat(uri);
+            if (stat.type === vscode.FileType.Directory) {
+                // If a directory is selected, recursively find all files within it.
+                const filesInDir = await vscode.workspace.findFiles(new vscode.RelativePattern(uri, '**/*'));
+                for (const file of filesInDir) {
+                    fileUris.add(file);
+                }
+            } else if (stat.type === vscode.FileType.File) {
+                fileUris.add(uri);
+            }
+        } catch (error) {
+            // If fs.stat fails, it's likely a deleted file URI from the SCM view.
+            // We add it to the list and let the Git logic determine its status later.
+            console.warn(`fs.stat failed for ${uri.fsPath}. Assuming it's a file managed by source control (e.g., deleted).`);
+            fileUris.add(uri);
+        }
+    }
+
+    return Array.from(fileUris);
+}
+
+/**
+ * Main activation function, called by VS Code when the extension is activated.
+ */
 export function activate(context: vscode.ExtensionContext) {
 
+    // Register the main command of the extension.
     context.subscriptions.push(vscode.commands.registerCommand('gitgg.compareFile', async (...args: any[]) => {
 
+        // Show a progress notification to the user for the duration of the command.
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: "Gitgg: Preparing comparison...",
@@ -21,11 +67,12 @@ export function activate(context: vscode.ExtensionContext) {
                 console.log("User canceled the comparison.");
             });
 
+            // --- 1. GATHER AND VALIDATE USER INPUT ---
             progress.report({ increment: 0, message: "Analyzing selected files..." });
 
-            let urisToCompare: vscode.Uri[] = [];
+            let initialUris: vscode.Uri[] = [];
 
-            // More robust logic to find all URIs in the arguments
+            // Helper function to robustly extract URIs from various VS Code contexts.
             function extractUris(arg: any): vscode.Uri[] {
                 if (arg instanceof vscode.Uri) {
                     return [arg];
@@ -39,35 +86,67 @@ export function activate(context: vscode.ExtensionContext) {
                 return [];
             }
 
-            urisToCompare = args.flatMap(arg => extractUris(arg));
+            initialUris = args.flatMap(arg => extractUris(arg));
 
-            // Filter out duplicate URIs that can sometimes be passed by VS Code's context menu commands.
-            // This ensures the extension correctly identifies a single-file selection.
-            urisToCompare = [...new Set(urisToCompare.map(uri => uri.toString()))].map(uriString => vscode.Uri.parse(uriString));
-
-            if (urisToCompare.length === 0 && vscode.window.activeTextEditor) {
-                urisToCompare.push(vscode.window.activeTextEditor.document.uri);
+            // If no selection, fall back to the currently active editor file.
+            if (initialUris.length === 0 && vscode.window.activeTextEditor) {
+                initialUris.push(vscode.window.activeTextEditor.document.uri);
             }
 
-            if (urisToCompare.length === 0) {
-                vscode.window.showErrorMessage('No valid file selected for comparison.');
+            if (initialUris.length === 0) {
+                vscode.window.showErrorMessage('No file or folder selected for comparison.');
                 return;
             }
 
-            const firstUri = urisToCompare[0];
-            const repoPath = vscode.workspace.getWorkspaceFolder(firstUri)?.uri.fsPath;
+            // Resolve any selected folders into a list of files and remove duplicates.
+            progress.report({ increment: 5, message: "Resolving folders..." });
+            const urisToCompare = await resolveUrisToFiles(initialUris);
+            
+            const uniqueUris = [...new Set(urisToCompare.map(uri => uri.toString()))].map(uriString => vscode.Uri.parse(uriString));
+
+            if (uniqueUris.length === 0) {
+                vscode.window.showErrorMessage('No valid files found in the selection to compare.');
+                return;
+            }
+
+            // --- 2. DETERMINE THE GIT REPOSITORY PATH ---
+            // This logic robustly finds the repository root, especially in multi-root workspaces.
+            let repoPath: string | undefined;
+            const firstUri = uniqueUris[0];
+
+            if (firstUri) {
+                const workspaceFolder = vscode.workspace.getWorkspaceFolder(firstUri);
+                if (workspaceFolder) {
+                    repoPath = workspaceFolder.uri.fsPath;
+                }
+            }
+
+            if (!repoPath && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                if (vscode.workspace.workspaceFolders.length === 1) {
+                    repoPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                } else {
+                    const folderContainingFile = vscode.workspace.workspaceFolders.find(folder => firstUri.fsPath.startsWith(folder.uri.fsPath));
+                    if (folderContainingFile) {
+                        repoPath = folderContainingFile.uri.fsPath;
+                    } else {
+                        repoPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                    }
+                }
+            }
+
             if (!repoPath) {
-                vscode.window.showErrorMessage('Error: The selected file(s) are not in a Git workspace.');
+                vscode.window.showErrorMessage('Error: Could not determine the Git workspace. Please open a folder containing a Git repository.');
                 return;
             }
 
+            // --- 3. INITIALIZE GIT AND GET BRANCH INFORMATION ---
             const options: Partial<SimpleGitOptions> = {
                 baseDir: repoPath,
                 binary: 'git',
                 maxConcurrentProcesses: 6,
             };
 
-            const git = simpleGit(options);
+            const git: SimpleGit = simpleGit(options);
 
             try {
                 progress.report({ increment: 10, message: "Checking Git repository..." });
@@ -77,6 +156,7 @@ export function activate(context: vscode.ExtensionContext) {
                     return;
                 }
 
+                // Get local branches and prompt the user to select one for comparison.
                 progress.report({ increment: 25, message: "Fetching local branches..." });
                 const branches = await git.branchLocal();
                 const currentBranch = branches.current;
@@ -90,11 +170,11 @@ export function activate(context: vscode.ExtensionContext) {
 
                 const targetBranch = selectedItem.label;
 
-                // Fetch logic to ensure we are comparing against the remote
+                // Fetch from the remote to ensure the comparison is against the latest version.
                 progress.report({ increment: 50, message: `Fetching updates for '${targetBranch}'...` });
                 let comparisonSource = targetBranch;
                 try {
-                    const remotes = await git.getRemotes();
+                    const remotes = await git.getRemotes(true);
                     const hasOrigin = remotes.some(r => r.name === 'origin');
                     if (hasOrigin) {
                         await git.fetch('origin', targetBranch);
@@ -103,37 +183,53 @@ export function activate(context: vscode.ExtensionContext) {
                 } catch (error: any) {
                     vscode.window.showWarningMessage(`Could not fetch updates for '${targetBranch}'. Comparing with the local version, which may be outdated.`);
                 }
-
-                const status = await git.status();
+                
+                // --- 4. DETERMINE COMPARISON LABELS AND MODE ---
+                const status: StatusResult = await git.status();
                 let localFileLabel = currentBranch;
+
+                // If comparing against the current branch, check for local uncommitted changes
+                // to correctly label the local version as 'Working Tree'.
                 if (targetBranch === currentBranch) {
-                    const areFilesModifiedOrUntracked = urisToCompare.some(uri => {
-                        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
-                        const isModified = status.modified.some((file: string) => file === relativePath);
-                        const isUntracked = status.not_added.some((file: string) => file === relativePath);
-                        return isModified || isUntracked;
+                    const hasWorkingTreeChanges = uniqueUris.some(uri => {
+                        const relativePath = path.relative(repoPath!, uri.fsPath).replace(/\\/g, '/');
+                        const isModified = status.modified.includes(relativePath);
+                        const isUntracked = status.not_added.includes(relativePath);
+                        const isDeleted = status.deleted.includes(relativePath);
+                        return isModified || isUntracked || isDeleted;
                     });
-                    if (areFilesModifiedOrUntracked) {
+
+                    if (hasWorkingTreeChanges) {
                         localFileLabel = 'Working Tree';
                     }
                 }
 
-                let comparisonMode: ComparisonMode = 'separate';
+                // Smartly decide which comparison mode to use based on the number of files.
+                let comparisonMode: ComparisonMode = 'separate'; // Default for single files
+                if (uniqueUris.length > 1) {
+                    // For a small number of files, ask the user.
+                    if (uniqueUris.length <= 5) {
+                        const options = [
+                            { label: 'Compare in Separate Tabs', description: 'Opens a diff tab for each file', mode: 'separate' as ComparisonMode },
+                            { label: 'Compare in a Single View', description: 'Opens a summary of all changes in a single view', mode: 'singleView' as ComparisonMode }
+                        ];
+                        const choice = await vscode.window.showQuickPick(options, { placeHolder: `How do you want to compare the ${uniqueUris.length} selected files?` });
 
-                if (urisToCompare.length > 1) {
-                    const options = [
-                        { label: 'Compare in Separate Tabs', description: 'Opens a diff tab for each file', mode: 'separate' as ComparisonMode },
-                        { label: 'Compare in a Single View', description: 'Opens a summary of all changes in a single view', mode: 'singleView' as ComparisonMode }
-                    ];
-                    const choice = await vscode.window.showQuickPick(options, { placeHolder: `How do you want to compare the ${urisToCompare.length} selected files?` });
-                    if (!choice || token.isCancellationRequested) { return; }
-                    comparisonMode = choice.mode;
+                        if (!choice || token.isCancellationRequested) { return; }
+                        comparisonMode = choice.mode;
+                    } 
+                    // For a large number of files, default to the single view for better performance.
+                    else {
+                        comparisonMode = 'singleView';
+                        vscode.window.showInformationMessage(`Comparing ${uniqueUris.length} files in a single view for better performance.`);
+                    }
                 }
 
+                // --- 5. EXECUTE THE COMPARISON ---
                 if (comparisonMode === 'separate') {
-                    await runNativeDiffComparison(progress, token, urisToCompare, repoPath, git, currentBranch, targetBranch, comparisonSource, localFileLabel);
+                    await runNativeDiffComparison(progress, token, uniqueUris, repoPath, git, currentBranch, targetBranch, comparisonSource, localFileLabel, status);
                 } else {
-                    await runWebviewDiffComparison(context, progress, token, urisToCompare, repoPath, git, currentBranch, targetBranch, comparisonSource, localFileLabel, status);
+                    await runWebviewDiffComparison(context, progress, token, uniqueUris, repoPath, git, currentBranch, targetBranch, comparisonSource, localFileLabel, status);
                 }
 
             } catch (error: any) {
@@ -146,81 +242,89 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 /**
- * Creates a custom Webview panel to display a summary of all diffs.
+ * Handles the multi-file comparison by creating and showing a custom Webview panel.
  */
-async function runWebviewDiffComparison(context: vscode.ExtensionContext, progress: any, token: vscode.CancellationToken, urisToCompare: vscode.Uri[], repoPath: string, git: any, currentBranch: string, targetBranch: string, comparisonSource: string, localFileLabel: string, status: any) {
+async function runWebviewDiffComparison(context: vscode.ExtensionContext, progress: any, token: vscode.CancellationToken, urisToCompare: vscode.Uri[], repoPath: string, git: SimpleGit, currentBranch: string, targetBranch: string, comparisonSource: string, localFileLabel: string, status: StatusResult) {
     progress.report({ increment: 90, message: "Rendering view..." });
 
-    const filesData = [];
+    // Iterate through each file to generate its Git diff patch.
+    const allFilesData: FileData[] = [];
     for (const uri of urisToCompare) {
         if (token.isCancellationRequested) { return; }
         const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
+        const isUntracked = status.not_added.includes(relativePath);
 
         let patch: string | null = null;
-        const isUntracked = status.not_added.some((file: string) => file === relativePath);
-
         if (isUntracked) {
-            // Special handling for untracked files: diff against /dev/null
-            try {
-                const diffOutput = await git.diff(['--no-index', '--', '/dev/null', uri.fsPath]);
-                // Reformat the header to be consistent with other diffs
-                patch = diffOutput.replace('--- /dev/null', `--- a/${relativePath}`);
-            } catch (error) {
-                console.error(`Error generating diff for untracked file: ${error}`);
-                patch = null;
-            }
+            patch = await git.diff(['--no-index', '--', '/dev/null', uri.fsPath]).then(d => d.replace('--- /dev/null', `--- a/${relativePath}`)).catch(error => {console.error(`Error generating diff for untracked file ${relativePath}:`, error); return null; });
         } else {
-            // Normal diff for existing files
             patch = await git.diff([comparisonSource, '--', relativePath]).catch(() => '');
         }
-
-        filesData.push({
+        
+        allFilesData.push({
             filePath: relativePath,
             patch: patch,
-            noChanges: !patch || patch.trim().length === 0
+            noChanges: !patch || patch.trim().length === 0,
+            isNewInDiff: patch?.includes('new file mode') ?? false,
+            isDeletedInDiff: patch?.includes('deleted file mode') ?? false,
         });
     }
 
     if (token.isCancellationRequested) return;
 
-    // === Ordening the files: ADDED -> CHANGED -> UNCHANGED ===
-    const addedFiles = filesData
-        .filter(f => status.not_added.includes(f.filePath))
-        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+    // Categorize files into Added, Changed, Deleted, and Unchanged for organized display.
+    const addedFiles: FileData[] = [];
+    const changedFiles: FileData[] = [];
+    const deletedFiles: FileData[] = [];
+    const unchangedFiles: FileData[] = [];
+    
+    const isComparingWorkingTree = localFileLabel === 'Working Tree';
+    allFilesData.forEach(file => {
+        if (isComparingWorkingTree) {
+            const fileStatus = status.files.find(f => f.path === file.filePath);
+            if (fileStatus && (fileStatus.working_dir === '?' || fileStatus.index === 'A')) {
+                addedFiles.push(file);
+            } else if (status.deleted.includes(file.filePath)) {
+                deletedFiles.push(file);
+            } else if (file.noChanges) {
+                unchangedFiles.push(file);
+            } else {
+                changedFiles.push(file);
+            }
+        } else {
+            if (file.noChanges) {
+                unchangedFiles.push(file);
+            } else if (file.isNewInDiff) {
+                addedFiles.push(file);
+            } else if (file.isDeletedInDiff) {
+                deletedFiles.push(file);
+            } else {
+                changedFiles.push(file);
+            }
+        }
+    });
 
-    const changedFilesOnly = filesData
-        .filter(f => !status.not_added.includes(f.filePath) && !f.noChanges)
-        .sort((a, b) => a.filePath.localeCompare(b.filePath));
+    // Sort files alphabetically within each category.
+    addedFiles.sort((a, b) => a.filePath.localeCompare(b.filePath));
+    changedFiles.sort((a, b) => a.filePath.localeCompare(b.filePath));
+    deletedFiles.sort((a, b) => a.filePath.localeCompare(b.filePath));
+    unchangedFiles.sort((a, b) => a.filePath.localeCompare(b.filePath));
 
-    const unchangedFilesOnly = filesData
-        .filter(f => f.noChanges)
-        .sort((a, b) => a.filePath.localeCompare(b.filePath));
-
-    const changedFiles = [...addedFiles, ...changedFilesOnly];
-    const unchangedFiles = unchangedFilesOnly;
-
-    const fileCountText = `(${urisToCompare.length} files)`;
-    const singleFileName = urisToCompare.length === 1 ? path.basename(urisToCompare[0].fsPath) : null;
-
-    const panelTitle = urisToCompare.length === 1
-        ? `Changes in ${singleFileName} (${targetBranch} ↔ ${localFileLabel})`
-        : `Changes between (${targetBranch}) ↔ (${localFileLabel}) ${fileCountText}`;
-
-    const panel = vscode.window.createWebviewPanel(
-        'gitgg-diff-summary',
-        panelTitle,
-        vscode.ViewColumn.One,
-        { enableScripts: true, retainContextWhenHidden: true }
-    );
-
-    // ⚡ Cache for full diff content to improve performance
+    // Create the Webview panel with a dynamic title.
+    const panelTitle = `Changes between (${targetBranch}) ↔ (${localFileLabel}) (${urisToCompare.length} files)`;
+    const panel = vscode.window.createWebviewPanel('gitgg-diff-summary', panelTitle, vscode.ViewColumn.One, { 
+        enableScripts: true, 
+        retainContextWhenHidden: true,
+        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview')]
+    });
     const diffCache: Record<string, string> = {};
 
+    // This listener is the bridge from the Webview back to the extension.
+    // It handles the 'View full Diff' button click.
     panel.webview.onDidReceiveMessage(async msg => {
         if (msg.command === 'openDiff') {
-            const fileUri = vscode.Uri.file(path.join(repoPath, msg.path));
+            const isDeleted = status.deleted.includes(msg.path);
 
-            // Use cache if available
             let tempContent = diffCache[msg.path];
             if (!tempContent) {
                 tempContent = await git.show([`${comparisonSource}:${msg.path}`]).catch(() => '');
@@ -229,169 +333,97 @@ async function runWebviewDiffComparison(context: vscode.ExtensionContext, progre
 
             const tempFilePath = path.join(os.tmpdir(), `gitgg-${path.basename(msg.path)}-${Date.now()}`);
             fs.writeFileSync(tempFilePath, tempContent);
-            await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(tempFilePath), fileUri, `Comparing ${path.basename(msg.path)} (${targetBranch}) ↔ (${localFileLabel})`, { preview: false });
+            const leftUri = vscode.Uri.file(tempFilePath);
+
+            // Determine the right side URI. For deleted files, use a virtual 'untitled' document.
+            const rightUri = isDeleted
+                ? leftUri.with({ scheme: 'untitled' })
+                : vscode.Uri.file(path.join(repoPath, msg.path));
+            
+            const diffTitle = `Comparing ${path.basename(msg.path)} (${targetBranch}) ↔ (${localFileLabel})`;
+            await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, diffTitle, { preview: false });
         }
     });
 
-    panel.webview.html = getWebviewContent(changedFiles, unchangedFiles);
+    // Generate and set the final HTML content for the panel.
+    panel.webview.html = getWebviewContent(context, panel.webview, addedFiles, changedFiles, deletedFiles, unchangedFiles, targetBranch, localFileLabel);
 }
 
 /**
- * This function handles the "old" way of opening native diff tabs.
+ * Handles comparison by opening a native VS Code diff editor for each file.
  */
-async function runNativeDiffComparison(progress: any, token: vscode.CancellationToken, urisToCompare: vscode.Uri[], repoPath: string, git: any, currentBranch: string, targetBranch: string, comparisonSource: string, localFileLabel: string) {
+async function runNativeDiffComparison(progress: any, token: vscode.CancellationToken, urisToCompare: vscode.Uri[], repoPath: string, git: SimpleGit, currentBranch: string, targetBranch: string, comparisonSource: string, localFileLabel: string, status: StatusResult) {
     let processed = 0;
     for (const uri of urisToCompare) {
         if (token.isCancellationRequested) { break; }
-
         processed++;
         progress.report({ increment: 75 + (processed / urisToCompare.length * 25), message: `Comparing ${path.basename(uri.fsPath)}...` });
 
         const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
+        const isDeleted = status.deleted.includes(relativePath);
+
         const fileContent = await git.show([`${comparisonSource}:${relativePath}`]).catch(() => '');
 
+        // Create a temporary file to hold the content from the target branch (left side of diff).
         const tempDir = os.tmpdir();
         const tempFileName = `gitgg-${path.basename(uri.fsPath)}-${Date.now()}`;
         const tempFilePath = path.join(tempDir, tempFileName);
         fs.writeFileSync(tempFilePath, fileContent);
-        const tempUri = vscode.Uri.file(tempFilePath);
+        const leftUri = vscode.Uri.file(tempFilePath);
 
+        // If the file is deleted, the right side is a virtual 'untitled' document.
+        // Otherwise, it's the actual file in the working tree.
+        const rightUri = isDeleted ? leftUri.with({ scheme: 'untitled' }) : uri;
         const diffTitle = `Comparing ${path.basename(uri.fsPath)} (${targetBranch}) ↔ (${localFileLabel})`;
-
-        await vscode.commands.executeCommand('vscode.diff', tempUri, uri, diffTitle, { preview: false });
+        
+        await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, diffTitle, { preview: false });
     }
 }
 
 /**
- * Generates the HTML content for our custom diff summary webview.
- * Change: now receives changedFiles and unchangedFiles separately to render UNCHANGED at the bottom
+ * Generates the HTML content for the Webview.
+ * It reads an HTML template from disk and injects the necessary data and asset URIs.
  */
-function getWebviewContent(changedFiles: { filePath: string, patch: string | null, noChanges: boolean }[], unchangedFiles: { filePath: string, patch: string | null, noChanges: boolean }[]): string {
-    const changedJson = JSON.stringify(changedFiles);
-    const unchangedJson = JSON.stringify(unchangedFiles);
+function getWebviewContent(
+    context: vscode.ExtensionContext,
+    webview: vscode.Webview,
+    addedFiles: FileData[],
+    changedFiles: FileData[],
+    deletedFiles: FileData[],
+    unchangedFiles: FileData[],
+    targetBranch: string,
+    localFileLabel: string
+): string {
+    
+    // Paths now point to the 'dist' folder, where assets will be copied during build.
+    const htmlPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview', 'webview.html');
+    const cssPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview', 'webview.css');
+    const jsPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview', 'main.js');
 
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Diff Summary</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
-<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
-<style>
-body { background-color: var(--vscode-editor-background); color: var(--vscode-editor-foreground); }
-.d2h-file-header { background-color: var(--vscode-sideBar-background); border-bottom: 1px solid var(--vscode-sideBar-border); padding: 5px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
-.d2h-file-wrapper { border: 1px solid var(--vscode-sideBar-border); margin-bottom: 1em; border-radius: 5px; }
-.d2h-files-diff { position: inherit; }
-.status-button { margin-left: 6px; padding: 1px 4px; font-size: 0.75em; cursor: pointer; background-color: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; border-radius: 2px; }
-.status-button:hover { background-color: var(--vscode-button-hoverBackground); }
-.status-badge { font-size: 0.8em; font-weight: bold; margin-left: 6px; }
-.status-added { color: #4caf50; } /* green for additions */
-.status-removed { color: #f44336; } /* red for deletions */
-.status-unchanged { color: gray; }
-</style>
-</head>
-<body>
-<div id="diff-container"></div>
-<script>
-const vscode = acquireVsCodeApi();
-const diffContainer = document.getElementById('diff-container');
-const changedFiles = ${changedJson};
-const unchangedFiles = ${unchangedJson};
+    // Convert the asset paths to special URIs that the webview can load.
+    const cssUri = webview.asWebviewUri(cssPath);
+    const jsUri = webview.asWebviewUri(jsPath);
 
-// Helper to extract only the file name
-function getFileName(filePath) { return filePath.split('/').pop(); }
+    // Read the HTML template file.
+    let htmlContent = fs.readFileSync(htmlPath.fsPath, 'utf8');
 
-// Helper: calculate added/removed lines
-function getLineChanges(patch){
-    if(!patch) return { added: 0, removed: 0 };
-    const lines = patch.split('\\n');
-    let added = 0, removed = 0;
-    lines.forEach(line => {
-        if(line.startsWith('+') && !line.startsWith('+++')) added++;
-        if(line.startsWith('-') && !line.startsWith('---')) removed++;
-    });
-    return { added, removed };
-}
+    // Prepare the data to be sent to the webview.
+    const webviewData = {
+        addedFiles,
+        changedFiles,
+        deletedFiles,
+        unchangedFiles,
+        targetBranch,
+        localFileLabel
+    };
 
-// Render files
-function renderFiles(files, isUnchanged=false){
-    files.forEach(file => {
-        const fileWrapper = document.createElement('div');
-        fileWrapper.className = 'd2h-file-wrapper';
-        diffContainer.appendChild(fileWrapper);
-
-        const configuration = {
-            drawFileList: false,
-            fileContentToggle: true,
-            matching: 'lines',
-            outputFormat: 'side-by-side',
-            renderNothingWhenEmpty: false,
-            colorScheme: 'dark',
-            diffMaxChanges: null,
-            context: file.patch ? Math.min(500, file.patch.split('\\n').length) : 100
-        };
-
-        const lineChanges = getLineChanges(file.patch);
-
-        if(isUnchanged){
-            const header = document.createElement('div');
-            header.className = 'd2h-file-header unchanged';
-            header.innerHTML = \`
-                <div style="display: flex; gap: 4px; align-items: center;">
-                    <span class="d2h-file-name">\${getFileName(file.filePath)}</span>
-                    <button class="status-button">View full Diff</button>
-                </div>
-                <span class="status-badge status-unchanged">UNCHANGED</span>
-            \`;
-            fileWrapper.appendChild(header);
-            const btn = header.querySelector('button.status-button');
-            btn.addEventListener('click', () => {
-                vscode.postMessage({ command: 'openDiff', path: file.filePath });
-            });
-        } else {
-            const patch = file.patch || '';
-            const diff2htmlUi = new Diff2HtmlUI(fileWrapper, patch, configuration);
-            diff2htmlUi.draw();
-
-            const viewedHeader = fileWrapper.querySelector('.d2h-file-header .d2h-file-name');
-            if(viewedHeader){
-                viewedHeader.textContent = getFileName(file.filePath);
-
-                // Only show badges for changed files, NOT new files
-                if(!file.noChanges && lineChanges.added + lineChanges.removed > 0){
-                    if(lineChanges.added > 0){
-                        const addedBadge = document.createElement('span');
-                        addedBadge.className = 'status-badge status-added';
-                        addedBadge.textContent = \`+\${lineChanges.added}\`;
-                        viewedHeader.parentNode.appendChild(addedBadge);
-                    }
-                    if(lineChanges.removed > 0){
-                        const removedBadge = document.createElement('span');
-                        removedBadge.className = 'status-badge status-removed';
-                        removedBadge.textContent = \`-\${lineChanges.removed}\`;
-                        viewedHeader.parentNode.appendChild(removedBadge);
-                    }
-                }
-
-                const btn = document.createElement('button');
-                btn.textContent = 'View full Diff';
-                btn.className = 'status-button';
-                btn.addEventListener('click', () => {
-                    vscode.postMessage({ command: 'openDiff', path: file.filePath });
-                });
-                viewedHeader.parentNode.appendChild(btn);
-            }
-        }
-    });
-}
-
-// Render changed files first, then unchanged
-renderFiles(changedFiles);
-renderFiles(unchangedFiles, true);
-</script>
-</body>
-</html>`;
+    // Replace placeholders in the HTML with the actual asset URIs and the serialized data.
+    htmlContent = htmlContent.replace(/_WEBVIEW_CSS_URI_/g, cssUri.toString());
+    htmlContent = htmlContent.replace(/_WEBVIEW_JS_URI_/g, jsUri.toString());
+    htmlContent = htmlContent.replace('_VSCODE_WEBVIEW_DATA_', JSON.stringify(webviewData));
+    htmlContent = htmlContent.replace(/\${webview.cspSource}/g, webview.cspSource);
+    
+    return htmlContent;
 }
 
 export function deactivate() {}

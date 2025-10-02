@@ -16,19 +16,21 @@
 
 # Gitgg: Simplified Git Branch Comparison
 
-Tired of complex commands just to see the difference between file versions on other branches? **Gitgg** is your essential tool for a quick and intuitive file comparison experience, directly inside VS Code.
+Tired of complex commands just to see the difference between file versions on other branches? **Gitgg** is your essential tool for a quick and intuitive comparison experience, directly inside VS Code.
 
-With just a couple of clicks, you can select one or more files and instantly diff them against any local branch in your repository.
+With just a couple of clicks, you can select files—or even entire folders—and instantly diff them against any local branch in your repository.
 
 ## ✨ Features
 
--   **🔎 Flexible File Comparison**: Instantly compare a single file or a selection of multiple files against any branch. The extension handles it all seamlessly.
+-   **🔎 Flexible Comparison**: Instantly compare a single file, multiple files, or entire folders against any branch. The extension handles it all seamlessly.
 
--   **🌳 "Working Tree" Awareness**: When comparing a file against its own branch, Gitgg intelligently detects uncommitted changes and labels your version as the `(Working Tree)`, so you always know what you're looking at.
+-   **🧠 Smart Workflow**: To optimize your experience, Gitgg only asks for your preference (separate tabs vs. single view) when comparing a small number of files (2-5). For larger comparisons, it automatically opens the powerful single view report to prevent workspace clutter.
 
--   **🚀 Quick & Easy Access**: No need to leave your editor. Access the compare feature directly from the right-click context menu in the File Explorer or on the editor tab. For even faster access, use the `Shift + \` keyboard shortcut.
+-   **🌳 "Working Tree" Awareness**: When comparing against the current branch, Gitgg intelligently detects uncommitted changes (including deletions) and labels your version as the `(Working Tree)`, so you always know what you're looking at.
 
--   **⚡ Optimized Multi-File Webview**: Custom Webview using `diff2html` to display all changes in a cohesive, visually appealing format.
+-   **🚀 Quick & Easy Access**: No need to leave your editor. Access the compare feature directly from the right-click context menu in the File Explorer. For even faster access, use the unified `Shift + \` keyboard shortcut for any context.
+
+-   **📊 Modern Multi-File Report**: When comparing multiple files or folders, Gitgg presents a clean Webview report with a high-level summary and categorized file lists (Added, Changed, Deleted), making it easy to review large changes at a glance.
 
 ## 🎬 Demo in Action
 
@@ -50,7 +52,7 @@ Use the context menu or the `Shift + \` shortcut to start a comparison instantly
 
 ## ✅ Requirements
 
--   Git must be installed and configured on your system.
+-   Git must be installed and available in your system's PATH.
 -   You must be working inside a project with an initialized Git repository.
 
 ## ⚙️ Extension Settings
