@@ -48,6 +48,11 @@ async function resolveUrisToFiles(uris: vscode.Uri[]): Promise<vscode.Uri[]> {
     return Array.from(fileUris);
 }
 
+// Helper for favorite branches button
+const StarIcon = new vscode.ThemeIcon('star-full');
+const StarEmptyIcon = new vscode.ThemeIcon('star-empty');
+
+
 /**
  * Main activation function, called by VS Code when the extension is activated.
  */
@@ -160,15 +165,55 @@ export function activate(context: vscode.ExtensionContext) {
                 progress.report({ increment: 25, message: "Fetching local branches..." });
                 const branches = await git.branchLocal();
                 const currentBranch = branches.current;
-                const items = branches.all.map(branch => ({ label: branch }));
 
-                const selectedItem = await vscode.window.showQuickPick(items, {
-                    placeHolder: `Compare with branch...`
+                // --- Favorite Branches Logic ---
+                const favoriteBranches = context.globalState.get<string[]>('favoriteBranches', []);
+
+                const buildQuickPickItems = (favorites: string[]) => {
+                    const favoriteItems = branches.all
+                        .filter(b => favorites.includes(b))
+                        .map(b => ({
+                            label: `$(star-full) ${b}`,
+                            branchName: b,
+                            buttons: [{ iconPath: StarIcon, tooltip: "Remove from favorites" }]
+                        }));
+
+                    const otherItems = branches.all
+                        .filter(b => !favorites.includes(b))
+                        .map(b => ({
+                            label: b,
+                            branchName: b,
+                            buttons: [{ iconPath: StarEmptyIcon, tooltip: "Add to favorites" }]
+                        }));
+
+                    return [...favoriteItems, ...otherItems];
+                };
+
+                const targetBranch = await new Promise<string | undefined>(resolve => {
+                    const quickPick = vscode.window.createQuickPick();
+                    quickPick.items = buildQuickPickItems(favoriteBranches);
+                    quickPick.placeholder = `Compare with branch... (Favorites ⭐️ are listed first)`;
+                    quickPick.onDidAccept(() => {
+                        const selection = quickPick.selectedItems[0] as any;
+                        resolve(selection?.branchName);
+                        quickPick.hide();
+                    });
+                    quickPick.onDidTriggerItemButton(async e => {
+                        const branchName = (e.item as any).branchName;
+                        let currentFavorites = context.globalState.get<string[]>('favoriteBranches', []);
+                        if (currentFavorites.includes(branchName)) {
+                            currentFavorites = currentFavorites.filter(b => b !== branchName);
+                        } else {
+                            currentFavorites.push(branchName);
+                        }
+                        await context.globalState.update('favoriteBranches', currentFavorites);
+                        quickPick.items = buildQuickPickItems(currentFavorites);
+                    });
+                    quickPick.onDidHide(() => resolve(undefined));
+                    quickPick.show();
                 });
 
-                if (token.isCancellationRequested || !selectedItem) { return; }
-
-                const targetBranch = selectedItem.label;
+                if (token.isCancellationRequested || !targetBranch) { return; }
 
                 // Fetch from the remote to ensure the comparison is against the latest version.
                 progress.report({ increment: 50, message: `Fetching updates for '${targetBranch}'...` });

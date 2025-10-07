@@ -2,7 +2,7 @@
     "name": "GuilhermeGarpelli",
     "displayName": "Gitgg - Branch File Diff",
     "description": "An extension for comparing files across different Git branches.",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "publisher": "ggarpelli",
     "icon": "icon.png",
     "repository": {

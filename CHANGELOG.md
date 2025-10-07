@@ -10,11 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- ✨ Add the ability to favorite branches (⭐️) for quicker access in the selection list.
 - 🚀 Add the ability to stage or revert changes for each file directly from the multi-file comparison view.
 
 ### Fixed
 - 🐛 Fixed a visual bug in the multi-file report where line numbers would overlap the code during horizontal scrolling.
+
+---
+
+## [0.1.3] - 2025-10-03
+
+### Added
+- ✨ Add the ability to favorite branches (⭐️) for quicker access in the selection list.
 
 ---
 
