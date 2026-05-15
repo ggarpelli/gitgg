@@ -1,14 +1,23 @@
 /* --- General Layout & Theming --- */
 /* These styles use VS Code theme variables to ensure the webview matches the user's current theme. */
+html,
 body {
     background-color: var(--vscode-editor-background);
     color: var(--vscode-editor-foreground);
+}
+
+body {
+    margin: 0;
+    padding: 10px;
 }
 
 .d2h-file-wrapper {
     border: 1px solid var(--vscode-sideBar-border);
     margin-bottom: 1em;
     border-radius: 5px;
+    background-color: var(--vscode-editorWidget-background);
+    color: var(--vscode-editor-foreground);
+    overflow: hidden;
 }
 
 .d2h-files-diff {
@@ -17,9 +26,24 @@ body {
 
 /* --- Summary Panel (Top Section) --- */
 #summary-container {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 16px;
+    align-items: start;
     padding: 10px 8px;
     margin-bottom: 1em;
     border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+
+#summary-container .summary-line:not(#global-actions) {
+    grid-column: 1;
+}
+
+#global-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    justify-self: end;
+    align-self: start;
 }
 
 .summary-line {
@@ -97,6 +121,74 @@ body {
     color: var(--vscode-button-foreground);
 }
 
+/* Global action buttons */
+#global-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.global-stage-btn,
+.global-revert-btn,
+.global-unstage-btn,
+.global-restore-btn {
+    padding: 6px 12px;
+    font-size: 0.9em;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.global-stage-btn:hover,
+.global-revert-btn:hover,
+.global-unstage-btn:hover,
+.global-restore-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+/* File action buttons (stage, revert, restore) */
+.stage-btn,
+.revert-btn,
+.restore-btn {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+.stage-btn:hover,
+.revert-btn:hover,
+.restore-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+/* Fix for white background issue - ensure proper theme variables */
+.d2h-file-wrapper,
+.d2h-file-header,
+.d2h-file-title,
+.d2h-file-name,
+.d2h-file-stats {
+    color: var(--vscode-editor-foreground);
+}
+
+.d2h-file-wrapper {
+    border: 1px solid var(--vscode-sideBar-border);
+    margin-bottom: 1em;
+    border-radius: 5px;
+    background-color: var(--vscode-editorWidget-background);
+}
+
+.d2h-file-header {
+    background-color: var(--vscode-editorWidget-background);
+    border-bottom: 1px solid var(--vscode-sideBar-border);
+}
+
+.d2h-file-header svg,
+.d2h-icon {
+    fill: var(--vscode-editor-foreground);
+}
+
 .status-added-bg {
     background-color: var(--vscode-gitDecoration-addedResourceForeground);
 }
@@ -123,7 +215,25 @@ body {
     border-color: var(--vscode-descriptionForeground);
 }
 
-/* --- Status Colors (for text like line counts and summary items) --- */
+/* Force dark theme over diff2html defaults */
+body .d2h-file-wrapper,
+body .d2h-file-header,
+body .d2h-file-title,
+body .d2h-file-name,
+body .d2h-file-stats {
+    background-color: var(--vscode-editorWidget-background) !important;
+    color: var(--vscode-editor-foreground) !important;
+}
+
+body .d2h-file-wrapper {
+    border-color: var(--vscode-sideBar-border) !important;
+}
+
+body .d2h-file-header svg,
+body .d2h-icon {
+    fill: var(--vscode-editor-foreground) !important;
+}
+
 .status-added,
 .summary-item-added {
     color: var(--vscode-gitDecoration-addedResourceForeground);

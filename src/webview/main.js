@@ -3,26 +3,28 @@
 // It is responsible for all DOM manipulation, rendering the diffs, and handling user interaction.
 //
 
+import { html } from 'diff2html';
+import 'diff2html/bundles/css/diff2html.min.css';
+import './webview.css';
+
 // Get the special API object that allows the webview to post messages back to the extension.
 const vscode = acquireVsCodeApi();
 const diffContainer = document.getElementById('diff-container');
 
 // --- 1. Load Initial Data ---
-// The extension serializes all necessary data into a JSON string and places it in the HTML.
-// Here, we parse that JSON to get the file data and other metadata.
 const dataEl = document.getElementById('json-data');
-const {
+let {
     addedFiles,
     changedFiles,
     deletedFiles,
     unchangedFiles,
     targetBranch,
-    localFileLabel
+    localFileLabel,
+    status,
+    restorableFiles = []
 } = JSON.parse(dataEl.textContent);
 
-
 // --- 2. Build the Summary Header ---
-// This section dynamically creates the summary text at the top of the report.
 const summaryContainer = document.getElementById('summary-container');
 const summaryTitle = document.getElementById('summary-title');
 const summaryBranches = document.getElementById('summary-branches');
@@ -49,15 +51,11 @@ if (totalChanges > 0) {
 
 summaryBranches.innerHTML = `Branches Compared: ${targetBranch} &harr; ${localFileLabel}`;
 
-
 // --- 3. Helper Functions ---
-
-/** Extracts the filename from a full file path. */
 function getFileName(filePath) {
     return filePath.split('/').pop();
 }
 
-/** Calculates the number of added and removed lines from a Git patch string. */
 function getLineChanges(patch) {
     if (!patch) return { added: 0, removed: 0 };
     let added = 0, removed = 0;
@@ -69,20 +67,23 @@ function getLineChanges(patch) {
     return { added, removed };
 }
 
-// --- 4. Main Rendering Logic ---
+let currentStatus = status;
 
-/**
- * Renders a list of files into the DOM.
- * @param {Array} files - The array of file objects to render.
- * @param {string} fileType - The status of the files ('added', 'changed', etc.).
- */
+function isFileStaged(filePath) {
+    return currentStatus?.staged?.includes(filePath) ?? false;
+}
+
+function isFileRestorable(filePath) {
+    return restorableFiles.includes(filePath);
+}
+
+// --- 4. Main Rendering Logic ---
 function renderFiles(files, fileType) {
     files.forEach(file => {
         const fileWrapper = document.createElement('div');
         fileWrapper.className = 'd2h-file-wrapper';
         diffContainer.appendChild(fileWrapper);
 
-        // Create the header for this file, which is always visible and interactive.
         const header = document.createElement('div');
         const lineChanges = getLineChanges(file.patch);
 
@@ -90,7 +91,19 @@ function renderFiles(files, fileType) {
         let lineBadges = '';
         if (lineChanges.added > 0) lineBadges += `<span class="status-badge status-added">+${lineChanges.added}</span>`;
         if (lineChanges.removed > 0) lineBadges += `<span class="status-badge status-removed">-${lineChanges.removed}</span>`;
-        
+
+        let actionButtons = '';
+        if (fileType !== 'unchanged') {
+            const staged = isFileStaged(file.filePath);
+            actionButtons += `<button class="status-button stage-btn" data-action="${staged ? 'unstageFile' : 'stageFile'}">${staged ? 'Unstage' : 'Stage'}</button>`;
+            if (!staged) {
+                actionButtons += '<button class="status-button revert-btn">Revert</button>';
+            }
+        } else if (isFileRestorable(file.filePath)) {
+            actionButtons += '<button class="status-button restore-btn">Restore Changes</button>';
+        }
+        actionButtons += '<button class="status-button native-diff-btn">View full Diff</button>';
+
         if (fileType === 'unchanged') {
             header.className = 'd2h-file-header';
             statusBadge = '<span class="status-badge badge-border status-unchanged-bg">UNCHANGED</span>';
@@ -101,7 +114,7 @@ function renderFiles(files, fileType) {
                 statusBadge = '<span class="status-badge badge-bg status-added-bg">ADDED</span>';
             } else if (fileType === 'deleted') {
                 statusBadge = '<span class="status-badge badge-bg status-deleted-bg">DELETED</span>';
-            } else { // 'changed'
+            } else {
                 statusBadge = '<span class="status-badge badge-border status-changed-bg">CHANGED</span>';
             }
         }
@@ -114,28 +127,49 @@ function renderFiles(files, fileType) {
                 ${lineBadges}
             </div>
             <div class="d2h-file-stats">
-                <button class="status-button native-diff-btn">View full Diff</button>
+                ${actionButtons}
             </div>
         `;
         fileWrapper.appendChild(header);
 
-        // Add an event listener to the 'View full Diff' button to send a message back to the extension.
+        const stageBtn = header.querySelector('.stage-btn');
+        if (stageBtn) {
+            stageBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                vscode.postMessage({ command: stageBtn.dataset.action, path: file.filePath });
+            });
+        }
+
+        const revertBtn = header.querySelector('.revert-btn');
+        if (revertBtn) {
+            revertBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                vscode.postMessage({ command: 'revertFile', path: file.filePath });
+            });
+        }
+
+        const restoreBtn = header.querySelector('.restore-btn');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                vscode.postMessage({ command: 'restoreFile', path: file.filePath });
+            });
+        }
+
         header.querySelector('.native-diff-btn').addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevents the click from also toggling the collapsible section.
+            e.stopPropagation();
             vscode.postMessage({ command: 'openDiff', path: file.filePath });
         });
 
-        // For files with changes, set up the collapsible diff view.
         if (fileType !== 'unchanged') {
             const diffContentContainer = document.createElement('div');
-            diffContentContainer.style.display = 'none'; // Initially hidden.
+            diffContentContainer.style.display = 'none';
             fileWrapper.appendChild(diffContentContainer);
 
-            // Optimization: The diff is only rendered the first time the user clicks to expand it.
             let isDiffDrawn = false;
             header.addEventListener('click', () => {
                 if (!isDiffDrawn) {
-                    const LINE_LIMIT = 100; // Truncate large diffs for performance.
+                    const LINE_LIMIT = 100;
                     let patch = file.patch || '';
                     const lines = patch.split('\n');
                     let isTruncated = false;
@@ -145,8 +179,7 @@ function renderFiles(files, fileType) {
                         isTruncated = true;
                     }
 
-                    // Use the diff2html library to draw the side-by-side diff.
-                    const diff2htmlUi = new Diff2HtmlUI(diffContentContainer, patch, {
+                    const diffHtml = html(patch, {
                         drawFileList: false,
                         fileContentToggle: false,
                         matching: 'lines',
@@ -154,7 +187,7 @@ function renderFiles(files, fileType) {
                         renderNothingWhenEmpty: true,
                         colorScheme: 'dark'
                     });
-                    diff2htmlUi.draw();
+                    diffContentContainer.innerHTML = diffHtml;
 
                     if (isTruncated) {
                         const truncatedMsg = document.createElement('div');
@@ -162,16 +195,14 @@ function renderFiles(files, fileType) {
                         truncatedMsg.textContent = 'Diff truncated. Click "View full Diff" to see the complete file.';
                         diffContentContainer.appendChild(truncatedMsg);
                     }
-                    
-                    // Remove the default header created by diff2html, as we have our own.
+
                     const internalHeader = diffContentContainer.querySelector('.d2h-file-header');
                     if (internalHeader) {
                         internalHeader.style.display = 'none';
                     }
                     isDiffDrawn = true;
                 }
-                
-                // Toggle visibility of the diff container.
+
                 const isVisible = diffContentContainer.style.display !== 'none';
                 diffContentContainer.style.display = isVisible ? 'none' : 'block';
                 header.classList.toggle('d2h-file-header-collapsed', !isVisible);
@@ -180,9 +211,77 @@ function renderFiles(files, fileType) {
     });
 }
 
-// --- 5. Initial Render Call ---
-// Render each category of files in the desired order.
+// --- 5. Update Global Actions ---
+function updateGlobalActions() {
+    const globalActions = document.getElementById('global-actions');
+    const modifiedFiles = [...addedFiles, ...changedFiles, ...deletedFiles];
+    const hasRestorable = restorableFiles.length > 0;
+    const hasAnyChanges = modifiedFiles.length > 0;
+
+    const allStaged = hasAnyChanges && modifiedFiles.every(f => currentStatus.staged.includes(f.filePath));
+    const noneStaged = hasAnyChanges && modifiedFiles.every(f => !currentStatus.staged.includes(f.filePath));
+    const someStaged = hasAnyChanges && !allStaged && !noneStaged;
+
+    let html = '';
+
+    if (hasAnyChanges) {
+        if (allStaged) {
+            // All files staged: only Unstage All
+            html += `<button class="status-button global-unstage-btn">Unstage All</button>`;
+        } else {
+            // Some or none staged: Stage All + Unstage All + Revert All (in order)
+            html += `<button class="status-button global-stage-btn">Stage All</button>`;
+
+            // If some are staged, show Unstage All (for staged files)
+            if (someStaged) {
+                html += `<button class="status-button global-unstage-btn">Unstage All</button>`;
+            }
+
+            // Revert All always comes last (for non-staged files)
+            html += `<button class="status-button global-revert-btn">Revert All</button>`;
+        }
+    }
+
+    // Always show Restore All if there are restorable files
+    if (hasRestorable) {
+        html += `<button class="status-button global-restore-btn">Restore All Changes</button>`;
+    }
+
+    globalActions.innerHTML = html;
+
+    // Re-attach listeners
+    const stageBtn = globalActions.querySelector('.global-stage-btn');
+    if (stageBtn) stageBtn.addEventListener('click', () => vscode.postMessage({ command: 'stageAll' }));
+
+    const unstageBtn = globalActions.querySelector('.global-unstage-btn');
+    if (unstageBtn) unstageBtn.addEventListener('click', () => vscode.postMessage({ command: 'unstageAll' }));
+
+    const revertBtn = globalActions.querySelector('.global-revert-btn');
+    if (revertBtn) revertBtn.addEventListener('click', () => vscode.postMessage({ command: 'revertAll' }));
+
+    const restoreBtn = globalActions.querySelector('.global-restore-btn');
+    if (restoreBtn) restoreBtn.addEventListener('click', () => vscode.postMessage({ command: 'restoreAll' }));
+}
+
+// --- 6. Listen for messages from the extension ---
+window.addEventListener('message', event => {
+    const message = event.data;
+    if (message.command === 'refresh') {
+        const { addedFiles: a, changedFiles: c, deletedFiles: d, unchangedFiles: u, status: s, restorableFiles: r = [] } = message.data;
+        currentStatus = s;
+        restorableFiles = r;
+        diffContainer.innerHTML = '';
+        renderFiles(a, 'added');
+        renderFiles(c, 'changed');
+        renderFiles(d, 'deleted');
+        renderFiles(u, 'unchanged');
+        updateGlobalActions();
+    }
+});
+
+// --- 6. Initial Render Call ---
 renderFiles(addedFiles, 'added');
 renderFiles(changedFiles, 'changed');
 renderFiles(deletedFiles, 'deleted');
 renderFiles(unchangedFiles, 'unchanged');
+updateGlobalActions();

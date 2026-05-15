@@ -3,15 +3,13 @@
 <head>
     <meta charset="UTF-8">
 
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} https://cdn.jsdelivr.net 'unsafe-inline'; script-src 'nonce-random-nonce' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src _CSP_SOURCE_ 'unsafe-inline'; script-src 'nonce-_NONCE_';">
 
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Diff Summary</title>
-    
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css" />
+
     <link rel="stylesheet" href="_WEBVIEW_CSS_URI_">
 
-    <script nonce="random-nonce" src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
 </head>
 <body>
     <script id="json-data" type="application/json">_VSCODE_WEBVIEW_DATA_</script>
@@ -25,10 +23,14 @@
             <svg viewBox="0 0 16 16" version="1.1" xmlns="http://www.w3.org/2000/svg"><path d="M12.28 7.22a.75.75 0 0 0 0-1.06l-2.25-2.25a.75.75 0 0 0-1.06 1.06L10.44 6H2.75a.75.75 0 0 0 0 1.5h7.69l-1.47 1.47a.75.75 0 1 0 1.06 1.06l2.25-2.25zM4.78 8.72a.75.75 0 0 0 0 1.06l2.25 2.25a.75.75 0 1 0 1.06-1.06L6.62 10h7.63a.75.75 0 0 0 0-1.5H6.62l1.47-1.47a.75.75 0 1 0-1.06-1.06l-2.25 2.25z"></path></svg>
             <span id="summary-branches"></span>
         </div>
+        <div class="summary-line" id="global-actions">
+            <button class="status-button global-stage-btn">Stage All</button>
+            <button class="status-button global-revert-btn">Revert All</button>
+        </div>
     </div>
 
     <div id="diff-container"></div>
-    
-    <script nonce="random-nonce" src="_WEBVIEW_JS_URI_"></script>
+
+    <script nonce="_NONCE_" src="_WEBVIEW_JS_URI_"></script>
 </body>
 </html>

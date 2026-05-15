@@ -9,18 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.1.4] - 2026-05-15
+
 ### Added
-- 🚀 Add the ability to stage or revert changes for each file directly from the multi-file comparison view.
+- 🔄 **Dynamic Global Action Buttons**: Smart button display that adapts to your Git state - Stage All, Unstage All, Revert All, and Restore All Changes
+- 💾 **File Revert with Backup**: Revert individual or all files with automatic backup - restore them anytime before closing the panel
+- 🎨 **Consistent Button Styling**: All action buttons now share the same visual style for a cohesive experience
+- ⌨️ **Keyboard Shortcut**: `Shift + \` shortcut now works across Editor, Explorer, and Source Control contexts
+
+### Changed
+- 📝 **Improved Revert Logic**: "Revert All" now only reverts non-staged files, preserving your staged changes
+- 🎯 **Button Ordering**: Global buttons now appear in logical order: Stage All → Unstage All → Revert All
+- 📋 **Enhanced README**: Updated documentation with new features and release notes
 
 ### Fixed
-- 🐛 Fixed a visual bug in the multi-file report where line numbers would overlap the code during horizontal scrolling.
+- 🐛 **File Classification**: Fixed file state detection to properly track files after revert operations
+- 🐛 **Restore Functionality**: Fixed backup/restore system to properly recover reverted files
+
+---
+
+---
+
+## [0.1.4] - 2026-05-14
+
+### Added
+- 🔒 **Webview Security**: Nonce dinâmico gerado por requisição no `getWebviewContent()`, eliminando o nonce fixo inseguro
+- 📦 **diff2html Bundled**: O diff2html agora é instalado localmente e empacotado via webpack (`target: 'web'`), eliminando dependência de CDN externa
+- 🧹 **Limpeza de Arquivos Temporários**: Temp files agora são rastreados e removidos automaticamente ao fechar difffs, painéis ou ao desativar a extensão
+- 🎯 **Stage/Stage/Stage/Stage/Revert na Webview**: Botões "Stage" e "Revert" em cada arquivo no relatório multi-arquivo, permitindo staging/reversão direta da interface
+- 🔧 **QuickPick Dispose**: Corrigido vazamento de memória — QuickPick agora é descartado corretamente ao fechar
+- ✅ **GitHub Actions CI/CD**: Workflow automatizado com build, lint, testes e publicação automática no Marketplace via tags
+- 🧪 **Infraestrutura de Testes**: Scripts `npm test` e `npm run compile` configurados
+
+### Changed
+- 📝 **ESLint Expandido**: Novas regras (`no-explicit-any`, `no-floating-promises`, `no-unused-vars`) para maior qualidade de código
+- 🏷️ **Tipos Melhorados**: Uso de `unknown` em vez de `any` em funções como `extractUris` e handlers de erro
+- 📦 **Dependências Corrigidas**: `simple-git` movido de `devDependencies` para `dependencies` (era usado em runtime)
+- 🎨 **Webview Template Limpo**: Removidos links CDN, CSP agora usa apenas `webview.cspSource` e nonce dinâmico
+
+### Fixed
+- 🐛 **Typos Corrigidos**: `Preparing` (estava `Preparing`), `workspace` (estava `workspace` com 'c'), e diversos erros de sintaxe em `extension.ts`
 
 ---
 
 ## [0.1.3] - 2025-10-03
 
 ### Added
-- ✨ Add the ability to favorite branches (⭐️) for quicker access in the selection list.
+- 🚀 Add the ability to favorite branches (⭐️) for quicker access in the selection list.
 
 ---
 
