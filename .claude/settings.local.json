@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx webpack:*)",
+      "Bash(node -e \"const d = require\\(''diff2html''\\); console.log\\(Object.keys\\(d\\)\\)\")",
+      "Bash(node -e \"const { html } = require\\(''diff2html''\\); console.log\\(typeof html\\)\")",
+      "Bash(npx eslint:*)",
+      "Bash(npx tsc:*)",
+      "Bash(cd:*)",
+      "Bash(code --install-extension dist/GuilhermeGarpelli-0.2.0.vsix)"
+    ]
+  }
+}

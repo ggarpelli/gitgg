@@ -32,6 +32,8 @@ With just a couple of clicks, you can select files—or even entire folders—an
 
 -   **📊 Modern Multi-File Report**: When comparing multiple files or folders, Gitgg presents a clean Webview report with a high-level summary and categorized file lists (Added, Changed, Deleted), making it easy to review large changes at a glance.
 
+-   **🔄 Smart File Management**: Built-in source control panel with dynamic action buttons - Stage All, Unstage All, Revert All, and Restore All Changes. Revert individual files with automatic backup/restore support until you close the panel.
+
 ## 🎬 Demo in Action
 
 ### Comparing a Single File
