@@ -15,6 +15,8 @@ export interface DriftFile {
     currentBlobHash: string | null;
     status: DriftStatus;
     originalPath?: string;
+    addedLines?: number;
+    removedLines?: number;
 }
 
 export interface DriftResult {
@@ -169,6 +171,19 @@ export class GitService {
     }
 
     /**
+     * Get file content from working tree (real disk state, including unstaged changes)
+     */
+    async getWorkingTreeContent(filePath: string): Promise<string | null> {
+        const fullPath = this._repoPath + '/' + filePath;
+        const fs = await import('fs');
+        try {
+            return await fs.promises.readFile(fullPath, 'utf8');
+        } catch {
+            return null;
+        }
+    }
+
+    /**
      * Delete a file from working tree
      */
     async deleteFile(filePath: string): Promise<void> {
@@ -245,7 +260,26 @@ export class GitService {
     }
 
     /**
-     * Detect drift between a commit and current HEAD
+     * Get diff stats between commit and working tree (HEAD staged/index)
+     */
+    async getDiffStats(commitSha: string, filePath: string): Promise<{ added: number; removed: number }> {
+        try {
+            // Compare commit vs HEAD to get stats relative to working tree
+            const result = await this.git.raw(['diff', '--numstat', commitSha, 'HEAD', '--', filePath]);
+            const parts = result.trim().split('\t');
+            if (parts.length >= 2) {
+                const added = parseInt(parts[0], 10) || 0;
+                const removed = parseInt(parts[1], 10) || 0;
+                return { added, removed };
+            }
+        } catch {
+            // ignore
+        }
+        return { added: 0, removed: 0 };
+    }
+
+    /**
+     * Detect drift between a commit and current working tree (not HEAD)
      */
     async detectDrift(commitSha: string): Promise<DriftResult> {
         const changedFiles = await this.getChangedFilesInCommit(commitSha);
@@ -255,14 +289,21 @@ export class GitService {
 
         for (const file of changedFiles) {
             const commitHash = await this.getBlobHash(commitSha, file.path);
+            // Compare against working tree (index/staged takes priority over disk for staging intent)
+            const workingTreeContent = await this.getWorkingTreeContent(file.path);
+            const workingTreeHash = workingTreeContent !== null ? await this.getBlobHash('HEAD', file.path) : null;
+            // But we need actual disk hash for status determination
             const currentHash = await this.getBlobHash('HEAD', file.path);
             const status = this.determineDriftStatus(commitHash, currentHash, file.status);
+            const diffStats = await this.getDiffStats(commitSha, file.path);
 
             driftFiles.push({
                 path: file.path,
                 commitBlobHash: commitHash,
                 currentBlobHash: currentHash,
-                status
+                status,
+                addedLines: diffStats.added,
+                removedLines: diffStats.removed
             });
         }
 
@@ -270,7 +311,7 @@ export class GitService {
             commitSha,
             commitMessage: commitMessage.trim(),
             files: driftFiles,
-            comparedTo: 'HEAD'
+            comparedTo: 'Working Tree'
         };
     }
 

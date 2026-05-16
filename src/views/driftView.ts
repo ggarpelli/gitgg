@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { GitService } from '../services/gitService';
 import { DriftResult, DriftFile } from '../services/gitService';
+import { html } from 'diff2html';
+
 
 export class DriftView {
     private panel: vscode.WebviewPanel | undefined;
@@ -78,19 +80,25 @@ export class DriftView {
         if (!this.gitService || !this.driftResult || !this.panel) return;
 
         const commitContent = await this.gitService.getFileContent(this.driftResult.commitSha, filePath);
-        const currentContent = await this.gitService.getFileContent('HEAD', filePath);
+        // Compare against REAL WORKING TREE (disk state), not HEAD
+        const currentContent = await this.gitService.getWorkingTreeContent(filePath);
+
+        // Get line counts from drift file
+        const driftFile = this.driftResult.files.find(f => f.path === filePath);
+        const addedLines = driftFile?.addedLines || 0;
+        const removedLines = driftFile?.removedLines || 0;
 
         let html = '';
         if (commitContent !== null && currentContent !== null) {
-            // Show diff
-            const diffResult = this.generateDiffHtml(commitContent, currentContent, filePath);
+            // Show side-by-side diff
+            const diffResult = this.generateSideBySideDiffHtml(commitContent, currentContent, filePath, addedLines, removedLines);
             html = diffResult;
-        } else if (commitContent !== null) {
-            html = `<div class="diff-header">Commit version (file missing in HEAD)</div><pre>${this.escapeHtml(commitContent)}</pre>`;
+        } else if (commitContent !== null && currentContent === null) {
+            html = `<div class="diff-header">Commit version (file missing in working tree)</div><pre>${this.escapeHtml(commitContent)}</pre>`;
         } else if (currentContent !== null) {
-            html = `<div class="diff-header">HEAD version (file missing in commit)</div><pre>${this.escapeHtml(currentContent)}</pre>`;
+            html = `<div class="diff-header">Working tree version (file not in commit)</div><pre>${this.escapeHtml(currentContent)}</pre>`;
         } else {
-            html = '<pre>File not found in commit or HEAD</pre>';
+            html = '<pre>File not found in commit or working tree</pre>';
         }
 
         this.panel.webview.postMessage({ command: 'showPreview', path: filePath, html });
@@ -121,6 +129,171 @@ export class DriftView {
         return html;
     }
 
+    private generateSideBySideDiffHtml(commitContent: string, currentContent: string, filePath: string, addedLines: number = 0, removedLines: number = 0): string {
+        // Generate unified diff format for diff2html
+        const safeFilePath = filePath.replace(/\\/g, '/');
+        let diff = this.generateUnifiedDiff(commitContent, currentContent, safeFilePath);
+
+        // EXACT same logic as main.js multi-files
+        const LINE_LIMIT = 100;
+        const lines = diff.split('\n');
+        let isTruncated = false;
+
+        if (lines.length > LINE_LIMIT) {
+            diff = lines.slice(0, LINE_LIMIT).join('\n');
+            isTruncated = true;
+        }
+
+        const diffHtml = html(diff, {
+            drawFileList: false,
+            matching: 'lines',
+            outputFormat: 'side-by-side',
+            renderNothingWhenEmpty: true,
+            colorScheme: 'dark' as any
+        });
+
+        let truncateMsg = '';
+        if (isTruncated) {
+            truncateMsg = '<div class="truncated-message">Diff truncated. Click "View full Diff" to see the complete file.</div>';
+        }
+
+        return `
+            <div class="sb-header">
+                <span class="sb-side-label">← Commit (${this.driftResult?.commitSha.substring(0, 7)})</span>
+                <span class="sb-stats"><span class="sb-added">+${addedLines}</span> <span class="sb-removed">-${removedLines}</span></span>
+                <span class="sb-side-label">Working Tree →</span>
+            </div>
+            ${truncateMsg}
+            <div class="d2h-wrapper">
+                ${diffHtml}
+            </div>
+        `;
+    }
+
+    private generateUnifiedDiff(oldContent: string, newContent: string, filePath: string): string {
+        const oldLines = oldContent.split('\n');
+        const newLines = newContent.split('\n');
+
+        // Simple LCS-based diff to generate hunk markers
+        const hunks = this.computeDiffHunks(oldLines, newLines);
+
+        let diff = `--- a/${filePath}\n+++ b/${filePath}\n`;
+
+        for (const hunk of hunks) {
+            diff += `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@\n`;
+            diff += hunk.lines.join('\n') + '\n';
+        }
+
+        return diff;
+    }
+
+    private computeDiffHunks(oldLines: string[], newLines: string[]): Array<{ oldStart: number; oldCount: number; newStart: number; newCount: number; lines: string[] }> {
+        const hunks: Array<{ oldStart: number; oldCount: number; newStart: number; newCount: number; lines: string[] }> = [];
+
+        // Use LCS to find differences
+        const lcs = this.longestCommonSubsequence(oldLines, newLines);
+
+        let oldIdx = 0;
+        let newIdx = 0;
+        let lcsIdx = 0;
+        let hunkStart = -1;
+        let hunkLines: string[] = [];
+        let oldStart = 0;
+        let newStart = 0;
+
+        const flushHunk = () => {
+            if (hunkLines.length > 0) {
+                hunks.push({
+                    oldStart: oldStart,
+                    oldCount: hunkLines.filter(l => !l.startsWith('+')).length,
+                    newStart: newStart,
+                    newCount: hunkLines.filter(l => !l.startsWith('-')).length,
+                    lines: hunkLines
+                });
+                hunkLines = [];
+            }
+        };
+
+        while (oldIdx < oldLines.length || newIdx < newLines.length) {
+            if (lcsIdx < lcs.length && oldIdx < oldLines.length && newIdx < newLines.length &&
+                oldLines[oldIdx] === lcs[lcsIdx] && newLines[newIdx] === lcs[lcsIdx]) {
+                // Common line
+                if (hunkStart >= 0) {
+                    hunkLines.push(' ' + oldLines[oldIdx]);
+                }
+                oldIdx++;
+                newIdx++;
+                lcsIdx++;
+            } else if (oldIdx < oldLines.length && (lcsIdx >= lcs.length || oldLines[oldIdx] !== lcs[lcsIdx])) {
+                // Line only in old
+                if (hunkStart < 0) {
+                    hunkStart = oldIdx;
+                    oldStart = oldIdx + 1;
+                    newStart = newIdx + 1;
+                }
+                hunkLines.push('-' + oldLines[oldIdx]);
+                oldIdx++;
+            } else if (newIdx < newLines.length && (lcsIdx >= lcs.length || newLines[newIdx] !== lcs[lcsIdx])) {
+                // Line only in new
+                if (hunkStart < 0) {
+                    hunkStart = oldIdx;
+                    oldStart = oldIdx + 1;
+                    newStart = newIdx + 1;
+                }
+                hunkLines.push('+' + newLines[newIdx]);
+                newIdx++;
+            }
+
+            // Flush if gap is too large (>3 context lines)
+            if (hunkStart >= 0 && hunkLines.length > 0) {
+                const lastLine = hunkLines[hunkLines.length - 1];
+                if (lastLine.startsWith(' ') && hunkLines.length > 6) {
+                    const contextAfterLastCommon = hunkLines.slice(-3).every(l => l.startsWith(' '));
+                    if (contextAfterLastCommon) {
+                        // Keep context in hunk but could split - for simplicity, just keep growing
+                    }
+                }
+            }
+        }
+
+        flushHunk();
+        return hunks;
+    }
+
+    private longestCommonSubsequence(a: string[], b: string[]): string[] {
+        const m = a.length;
+        const n = b.length;
+        const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+                if (a[i - 1] === b[j - 1]) {
+                    dp[i][j] = dp[i - 1][j - 1] + 1;
+                } else {
+                    dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                }
+            }
+        }
+
+        // Backtrack to find LCS
+        const lcs: string[] = [];
+        let i = m;
+        let j = n;
+        while (i > 0 && j > 0) {
+            if (a[i - 1] === b[j - 1]) {
+                lcs.unshift(a[i - 1]);
+                i--;
+                j--;
+            } else if (dp[i - 1][j] > dp[i][j - 1]) {
+                i--;
+            } else {
+                j--;
+            }
+        }
+
+        return lcs;
+    }
+
     private escapeHtml(text: string): string {
         return text
             .replace(/&/g, '&amp;')
@@ -144,8 +317,8 @@ export class DriftView {
         if (!this.gitService || !this.driftResult) return;
 
         for (const file of this.driftResult.files) {
-            if (file.status === 'MISSING_IN_CURRENT_BRANCH') {
-                // File exists in commit but not in HEAD - restore it
+            if (file.status === 'MISSING_IN_CURRENT_BRANCH' || file.status === 'MODIFIED' || file.status === 'RENAMED') {
+                // File exists in commit but is different/missing in working tree - restore commit version
                 const content = await this.gitService.getFileContent(this.driftResult.commitSha, file.path);
                 if (content !== null) {
                     await this.gitService.writeToWorkingTree(file.path, content);
@@ -155,7 +328,8 @@ export class DriftView {
                 // File was deleted in commit - delete from working tree
                 await this.gitService.deleteFile(file.path);
             }
-            // For other statuses, revert makes no sense in this context
+            // EXTRA_IN_CURRENT_BRANCH: file is extra in working tree, not revertable
+            // IDENTICAL: nothing to revert
         }
         await this.refresh();
     }
@@ -167,7 +341,8 @@ export class DriftView {
         if (sourceType === 'commit') {
             tempContent = await this.gitService.getFileContent(this.driftResult.commitSha, filePath) || '';
         } else {
-            tempContent = await this.gitService.getFileContent('HEAD', filePath) || '';
+            // Compare against working tree, not HEAD
+            tempContent = await this.gitService.getWorkingTreeContent(filePath) || '';
         }
 
         const tempFilePath = path.join(os.tmpdir(), `gitgg-drift-${path.basename(filePath)}-${Date.now()}`);
@@ -176,7 +351,7 @@ export class DriftView {
         const leftUri = vscode.Uri.file(tempFilePath);
         const rightUri = vscode.Uri.file(path.join(this.gitService.getRepoPath(), filePath));
 
-        const diffTitle = `${path.basename(filePath)} (${this.driftResult.commitSha.substring(0, 7)}) ↔ (${this.driftResult.comparedTo})`;
+        const diffTitle = `${path.basename(filePath)} (${this.driftResult.commitSha.substring(0, 7)}) ↔ Working Tree`;
         await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, diffTitle, { preview: false });
     }
 
@@ -213,6 +388,49 @@ export class DriftView {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'nonce-${nonce}';">
     <title>Drift Detection</title>
     <style>
+        /* ====== CSS COMPLETO DO DIFF2HTML PARA SIDE-BY-SIDE ====== */
+        .d2h-wrapper{text-align:left;font-family:Consolas,Monaco,monospace;font-size:12px}
+        .d2h-file-header{background:#2d2d2d;border-bottom:1px solid #3c3c3c;display:flex;height:35px;padding:5px 10px;align-items:center}
+        .d2h-file-stats{display:flex;font-size:13px;margin-left:auto;gap:0}
+        .d2h-lines-added{border:1px solid rgba(46,160,67,.4);border-radius:4px 0 0 4px;color:#3fb950;padding:2px 6px;text-align:right;background:rgba(46,160,67,.1)}
+        .d2h-lines-deleted{border:1px solid rgba(248,81,73,.4);border-radius:0 4px 4px 0;color:#f85149;margin-left:1px;padding:2px 6px;text-align:left;background:rgba(248,81,73,.1)}
+        .d2h-file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Consolas,Monaco,monospace;font-size:13px;color:#9cdcfe}
+        .d2h-file-wrapper{border:1px solid #3c3c3c;border-radius:4px;margin-bottom:1em;background:#1e1e1e;overflow:hidden}
+        .d2h-diff-table{border-collapse:collapse;font-family:Consolas,Monaco,monospace;font-size:12px;width:100%;table-layout:fixed}
+        .d2h-files-diff{display:flex;width:100%}
+        .d2h-file-diff{overflow-y:hidden;width:100%}
+        .d2h-file-side-diff{display:inline-block;overflow-x:auto;overflow-y:hidden;width:50%}
+        .d2h-code-line,.d2h-code-side-line{display:inline-block;white-space:nowrap;width:100%;box-sizing:border-box}
+        .d2h-code-side-line{padding:0 4.5em;position:relative;background:transparent}
+        .d2h-code-line-ctn{display:inline-block;padding:0;white-space:pre;width:100%;vertical-align:middle;color:#ccc;font-size:12px}
+        .d2h-code-side-line del,.d2h-code-side-line ins{text-decoration:none;border-radius:.15em;padding:0 1px}
+        .d2h-code-line del,.d2h-code-line ins{text-decoration:none;border-radius:.15em;padding:0 1px}
+        .d2h-code-linenumber{background-color:#0d1117;border-right:1px solid #21262d;color:#6e7681;display:inline-block;position:absolute;text-align:right;width:3.5em;padding:0 .5em;left:0;font-size:12px}
+        .d2h-code-side-linenumber{background-color:#0d1117;border-right:1px solid #21262d;color:#6e7681;display:inline-block;position:absolute;left:0;text-align:right;width:3.5em;padding:0 .5em;font-size:12px}
+        .d2h-emptyplaceholder{background-color:transparent}
+        .d2h-del{background-color:transparent}
+        .d2h-ins{background-color:transparent}
+        .d2h-info{background-color:rgba(56,139,253,.1);color:#6e7681}
+        .d2h-change{display:inline-block}
+        .line-num1,.line-num2{overflow:hidden;padding:0 .5em;text-overflow:ellipsis;width:2em;display:inline-block;text-align:right;color:#484f58}
+        .line-num2{width:2.5em}
+        tbody tr{border-bottom:1px solid #21262d;height:20px}
+        tbody tr:last-child{border-bottom:none}
+        .d2h-dark-color-scheme{background:#1e1e1e;color:#ccc}
+        .d2h-file-diff{background:#1e1e1e}
+        .d2h-file-side-diff{background:#1e1e1e}
+
+        /* Linhas removidas (vermelho) e adicionadas (verde) */
+        .d2h-code-side-line del,
+        .d2h-code-line del { background-color: rgba(248,81,73,.25); }
+        .d2h-code-side-line ins,
+        .d2h-code-line ins { background-color: rgba(46,160,67,.25); }
+
+        /* Contexto Lines - sem fundo */
+        .d2h-code-side-line,
+        .d2h-code-line { background: transparent; }
+
+        /* ====== ESTILOS CUSTOMIZADOS DO DRIFT VIEW ====== */
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: 20px;
@@ -277,16 +495,19 @@ export class DriftView {
             gap: 8px;
         }
         .file-item {
-            display: flex;
-            align-items: center;
             padding: 10px 15px;
             background: #2d2d2d;
             border-radius: 6px;
             border: 1px solid #3c3c3c;
             cursor: pointer;
+            margin-bottom: 5px;
         }
         .file-item:hover { border-color: #0e639c; }
         .file-item.selected { border-color: #9cdcfe; background: #3d3d3d; }
+        .file-main {
+            display: flex;
+            align-items: center;
+        }
         .file-path {
             flex: 1;
             font-family: 'Consolas', 'Monaco', monospace;
@@ -305,6 +526,15 @@ export class DriftView {
         .badge-extra { background: #2d4a5a; color: #7ad; }
         .badge-renamed { background: #4a2d5a; color: #a7d; }
         .badge-deleted { background: #5a2d2d; color: #d77; }
+        .file-preview {
+            display: none;
+            margin-top: 10px;
+            border-top: 1px solid #3c3c3c;
+            padding-top: 10px;
+        }
+        .file-preview.visible {
+            display: block;
+        }
 
         .action-btn {
             padding: 5px 12px;
@@ -362,13 +592,48 @@ export class DriftView {
             white-space: pre-wrap;
             word-break: break-all;
         }
-        .diff-add { background: #2d4a2d; color: #7d7; }
-        .diff-remove { background: #4a2d2d; color: #d77; }
-        .diff-context { color: #888; }
-        .diff-header { color: #9cdcfe; background: #2d2d2d; padding: 5px 10px; }
+
+        /* Line count in file list */
+        .line-counts {
+            font-size: 11px;
+            margin: 0 8px;
+            color: #888;
+        }
+        .line-added { color: #7d7; }
+        .line-removed { color: #d77; }
+
+        /* Truncated message */
+        .truncated-message {
+            padding: 8px;
+            text-align: center;
+            font-style: italic;
+            color: #888;
+            background: #252526;
+            border-top: 1px solid #3c3c3c;
+        }
+
+        /* Side-by-side header styles */
+        .sb-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #252526;
+            border-bottom: 1px solid #3c3c3c;
+            padding: 6px 12px;
+            color: #cecece;
+            font-size: 12px;
+            margin: -12px -12px 12px -12px;
+        }
+        .sb-stats { font-weight: bold; font-family: Consolas, Monaco, monospace; }
+        .sb-added { color: #7d7; }
+        .sb-removed { color: #d77; }
+        .sb-side-label { color: #cecece; font-size: 11px; }
+        .d2h-wrapper { background: #1e1e1e; }
+        .d2h-file-diff { background: #1e1e1e; }
     </style>
 </head>
 <body>
+    <div class="d2h-dark-color-scheme">
     <div class="header">
         <div class="commit-info">${driftResult.commitSha.substring(0, 7)} → ${driftResult.comparedTo}</div>
         <div class="commit-message">${driftResult.commitMessage}</div>
@@ -409,10 +674,35 @@ export class DriftView {
         });
         document.querySelectorAll('.file-item').forEach(item => {
             item.addEventListener('click', () => {
+                const filePath = item.dataset.path;
+                const previewId = 'preview-' + filePath.replace(/[^a-zA-Z0-9]/g, '_');
+                const previewDiv = document.getElementById(previewId);
+
+                // If clicking same file, toggle visibility
+                if (selectedFile === filePath && previewDiv) {
+                    if (previewDiv.classList.contains('visible')) {
+                        previewDiv.classList.remove('visible');
+                        item.classList.remove('selected');
+                        selectedFile = null;
+                    } else {
+                        previewDiv.classList.add('visible');
+                    }
+                    return;
+                }
+
+                // Hide all other previews
+                document.querySelectorAll('.file-item').forEach(i => {
+                    i.classList.remove('selected');
+                    const pid = 'preview-' + i.dataset.path.replace(/[^a-zA-Z0-9]/g, '_');
+                    const pdiv = document.getElementById(pid);
+                    if (pdiv) pdiv.classList.remove('visible');
+                });
+
+                // Show this preview
                 document.querySelectorAll('.file-item').forEach(i => i.classList.remove('selected'));
                 item.classList.add('selected');
-                selectedFile = item.dataset.path;
-                vscode.postMessage({ command: 'previewFile', path: item.dataset.path });
+                selectedFile = filePath;
+                vscode.postMessage({ command: 'previewFile', path: filePath });
             });
         });
         document.getElementById('stageAllBtn')?.addEventListener('click', () => {
@@ -432,12 +722,17 @@ export class DriftView {
         window.addEventListener('message', event => {
             const msg = event.data;
             if (msg.command === 'showPreview') {
-                const section = document.getElementById('previewSection');
-                const title = document.getElementById('previewTitle');
-                const content = document.getElementById('previewContent');
-                title.textContent = msg.path;
-                content.innerHTML = msg.html;
-                section.classList.add('visible');
+                // Show preview in per-file div, hide global preview
+                const previewId = 'preview-' + msg.path.replace(/[^a-zA-Z0-9]/g, '_');
+                const previewDiv = document.getElementById(previewId);
+                const globalSection = document.getElementById('previewSection');
+                if (previewDiv) {
+                    previewDiv.innerHTML = msg.html;
+                    previewDiv.classList.add('visible');
+                }
+                if (globalSection) {
+                    globalSection.classList.remove('visible');
+                }
             }
         });
     </script>
@@ -468,13 +763,20 @@ export class DriftView {
     private renderFileItem(file: any): string {
         const statusClass = file.status.toLowerCase().replace(/_/g, '-');
         const statusLabel = file.status.replace(/_/g, ' ');
+        const lineCounts = (file.addedLines !== undefined || file.removedLines !== undefined)
+            ? `<span class="line-counts"><span class="line-added">+${file.addedLines || 0}</span> <span class="line-removed">-${file.removedLines || 0}</span></span>`
+            : '';
 
         return `
             <div class="file-item" data-path="${file.path}">
-                <span class="file-path">${file.path}</span>
-                <span class="status-badge badge-${statusClass}">${statusLabel}</span>
-                <button class="action-btn diff-btn" data-path="${file.path}">Diff</button>
-                <button class="action-btn stage-btn" data-path="${file.path}">Stage</button>
+                <div class="file-main">
+                    <span class="file-path">${file.path}</span>
+                    ${lineCounts}
+                    <span class="status-badge badge-${statusClass}">${statusLabel}</span>
+                    <button class="action-btn diff-btn" data-path="${file.path}">Diff</button>
+                    <button class="action-btn stage-btn" data-path="${file.path}">Stage</button>
+                </div>
+                <div class="file-preview" id="preview-${file.path.replace(/[^a-zA-Z0-9]/g, '_')}"></div>
             </div>
         `;
     }

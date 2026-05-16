@@ -247,3 +247,84 @@ body .d2h-icon {
 .summary-item-changed {
     color: var(--vscode-gitDecoration-modifiedResourceForeground);
 }
+
+/* --- Side-by-side Preview Styles --- */
+.sb-preview {
+    padding: 12px;
+    border-bottom: 1px solid var(--vscode-sideBar-border);
+    background-color: var(--vscode-editorWidget-background);
+}
+
+.sb-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--vscode-sideBar-background);
+    border-bottom: 1px solid var(--vscode-sideBar-border);
+    font-size: 0.85em;
+}
+
+.sb-side-label {
+    color: var(--vscode-descriptionForeground);
+    font-weight: 500;
+}
+
+.sb-stats {
+    font-weight: bold;
+}
+
+.sb-added { color: var(--vscode-gitDecoration-addedResourceForeground); }
+.sb-removed { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+
+.sb-container {
+    display: flex;
+    max-height: 400px;
+    overflow: hidden;
+}
+
+.sb-left, .sb-right {
+    flex: 1;
+    overflow: auto;
+    max-height: 400px;
+    border: 1px solid var(--vscode-sideBar-border);
+}
+
+.sb-left { margin-right: 4px; }
+.sb-right { margin-left: 4px; }
+
+.sb-left pre, .sb-right pre {
+    margin: 0;
+    padding: 10px;
+    font-family: var(--vscode-editor-font-family);
+    font-size: var(--vscode-editor-font-size);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.sb-line {
+    display: block;
+    padding: 1px 6px;
+}
+
+.sb-line-number {
+    display: inline-block;
+    width: 40px;
+    text-align: right;
+    color: var(--vscode-editorLineNumber-foreground);
+    margin-right: 8px;
+    user-select: none;
+}
+
+.sb-added-line {
+    background-color: rgba(39, 176, 96, 0.15);
+}
+
+.sb-removed-line {
+    background-color: rgba(217, 74, 74, 0.15);
+}
+
+.sb-context-line {
+    background-color: transparent;
+}
