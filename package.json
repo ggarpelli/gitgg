@@ -16,7 +16,8 @@
         "Other"
     ],
     "activationEvents": [
-        "onCommand:gitgg.compareFile"
+        "onCommand:gitgg.compareFile",
+        "onCommand:gitgg.releaseDrift"
     ],
     "main": "./dist/extension.js",
     "files": [
@@ -28,6 +29,10 @@
             {
                 "command": "gitgg.compareFile",
                 "title": "Gitgg: Compare with another branch..."
+            },
+            {
+                "command": "gitgg.releaseDrift",
+                "title": "Gitgg: Release Drift Detection..."
             }
         ],
         "menus": {
