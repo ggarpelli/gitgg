@@ -41,13 +41,13 @@ export class DriftView {
             await this.handleMessage(msg);
         });
 
-        this.updateContent(driftResult);
+        await this.updateContent(driftResult);
     }
 
-    private updateContent(driftResult: DriftResult): void {
+    private async updateContent(driftResult: DriftResult): Promise<void> {
         if (!this.panel) return;
 
-        const html = this.generateHtml(driftResult);
+        const html = await this.generateHtml(driftResult);
         this.panel.webview.html = html;
     }
 
@@ -129,10 +129,18 @@ export class DriftView {
         return html;
     }
 
-    private generateSideBySideDiffHtml(commitContent: string, currentContent: string, filePath: string, addedLines: number = 0, removedLines: number = 0): string {
-        // Generate unified diff format for diff2html
+    private async generateSideBySideDiffHtml(commitContent: string, currentContent: string, filePath: string, addedLines: number = 0, removedLines: number = 0): Promise<string> {
+        // Generate unified diff using git service (same as multi-file comparison)
         const safeFilePath = filePath.replace(/\\/g, '/');
-        let diff = this.generateUnifiedDiff(commitContent, currentContent, safeFilePath);
+        let diff = '';
+
+        // Use git service if available, otherwise fall back to manual diff
+        if (this.gitService && this.driftResult?.commitSha) {
+            diff = await this.gitService.getUnifiedDiff(this.driftResult.commitSha, safeFilePath);
+        } else {
+            // Fallback to original method if gitService not available
+            diff = this.generateUnifiedDiff(commitContent, currentContent, safeFilePath);
+        }
 
         // EXACT same logic as main.js multi-files
         const LINE_LIMIT = 100;
@@ -760,12 +768,28 @@ export class DriftView {
         `;
     }
 
-    private renderFileItem(file: any): string {
+    private async renderFileItem(file: DriftFile): Promise<string> {
         const statusClass = file.status.toLowerCase().replace(/_/g, '-');
         const statusLabel = file.status.replace(/_/g, ' ');
         const lineCounts = (file.addedLines !== undefined || file.removedLines !== undefined)
             ? `<span class="line-counts"><span class="line-added">+${file.addedLines || 0}</span> <span class="line-removed">-${file.removedLines || 0}</span></span>`
             : '';
+
+        // Generate the side-by-side diff content for this file
+        let diffContent = '';
+        if (file.status !== DriftStatus.IDENTICAL) {
+            // Generate side-by-side diff using same logic as multi-file comparison
+            diffContent = await this.generateSideBySideDiffHtml(
+                '', // commitContent - not used when gitService is available
+                '', // currentContent - not used when gitService is available
+                file.path,
+                file.addedLines ?? 0,
+                file.removedLines ?? 0
+            );
+        } else {
+            // For identical files, show a message
+            diffContent = '<div class="identical-message">No differences</div>';
+        }
 
         return `
             <div class="file-item" data-path="${file.path}">
@@ -773,10 +797,11 @@ export class DriftView {
                     <span class="file-path">${file.path}</span>
                     ${lineCounts}
                     <span class="status-badge badge-${statusClass}">${statusLabel}</span>
-                    <button class="action-btn diff-btn" data-path="${file.path}">Diff</button>
                     <button class="action-btn stage-btn" data-path="${file.path}">Stage</button>
                 </div>
-                <div class="file-preview" id="preview-${file.path.replace(/[^a-zA-Z0-9]/g, '_')}"></div>
+                <div class="file-preview" data-path="${file.path}">
+                    ${diffContent}
+                </div>
             </div>
         `;
     }
