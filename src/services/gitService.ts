@@ -17,6 +17,7 @@ export interface DriftFile {
     originalPath?: string;
     addedLines?: number;
     removedLines?: number;
+    patch?: string;
 }
 
 export interface DriftResult {
@@ -279,6 +280,74 @@ export class GitService {
     }
 
     /**
+     * Get unified diff between commit and working tree for a file
+     * Uses the same approach as main.js multi-file comparison
+     */
+    async getUnifiedDiff(commitSha: string, filePath: string): Promise<string> {
+        try {
+            // Get diff between commit blob and working tree file
+            const result = await this.git.raw([
+                'diff',
+                '--unified=3',
+                `${commitSha}:${filePath}`,
+                '--',
+                `${this._repoPath}/${filePath}`
+            ]);
+            return result;
+        } catch (error) {
+            // Fallback - generate diff from content
+            return await this.generateFallbackDiff(commitSha, filePath);
+        }
+    }
+
+    private async generateFallbackDiff(commitSha: string, filePath: string): Promise<string> {
+        try {
+            const commitContent = await this.getFileContent(commitSha, filePath);
+            const workingTreeContent = await this.getWorkingTreeContent(filePath);
+            if (commitContent === null && workingTreeContent === null) return '';
+
+            const crypto = await import('crypto');
+            const hashContent = (content: string) =>
+                crypto.createHash('sha1').update(content, 'utf8').digest('hex').substring(0, 7);
+
+            const safePath = filePath.replace(/\\/g, '/');
+
+            if (commitContent === null) {
+                const h = await hashContent(workingTreeContent ?? '');
+                const lines = (workingTreeContent ?? '').split('\n');
+                return `diff --git a/${safePath} b/${safePath}\nnew file mode 100644\nindex 0000000..${h}\n--- /dev/null\n+++ b/${safePath}\n@@ -0,0 +${lines.length} @@\n${lines.map(l => '+' + l).join('\n')}`;
+            }
+            if (workingTreeContent === null) {
+                const h = await hashContent(commitContent ?? '');
+                const lines = (commitContent ?? '').split('\n');
+                return `diff --git a/${safePath} b/${safePath}\ndeleted file mode 100644\nindex ${h}..0000000\n--- a/${safePath}\n+++ /dev/null\n@@ -${lines.length},0 +0,0 @@\n${lines.map(l => '-' + l).join('\n')}`;
+            }
+
+            // Both exist - generate simple unified diff
+            const oldLines = (commitContent ?? '').split('\n');
+            const newLines = (workingTreeContent ?? '').split('\n');
+            const oldHash = await hashContent(commitContent ?? '');
+            const newHash = await hashContent(workingTreeContent ?? '');
+            let diff = `diff --git a/${safePath} b/${safePath}\nindex ${oldHash}..${newHash} 100644\n--- a/${safePath}\n+++ b/${safePath}\n`;
+
+            const maxLines = Math.max(oldLines.length, newLines.length);
+            for (let i = 0; i < maxLines; i++) {
+                const o = oldLines[i] ?? '';
+                const n = newLines[i] ?? '';
+                if (o === n) {
+                    diff += ` ${o}\n`;
+                } else {
+                    if (o) diff += `-${o}\n`;
+                    if (n) diff += `+${n}\n`;
+                }
+            }
+            return diff;
+        } catch {
+            return '';
+        }
+    }
+
+    /**
      * Detect drift between a commit and current working tree (not HEAD)
      */
     async detectDrift(commitSha: string): Promise<DriftResult> {
@@ -296,6 +365,7 @@ export class GitService {
             const currentHash = await this.getBlobHash('HEAD', file.path);
             const status = this.determineDriftStatus(commitHash, currentHash, file.status);
             const diffStats = await this.getDiffStats(commitSha, file.path);
+            const patch = await this.getUnifiedDiff(commitSha, file.path);
 
             driftFiles.push({
                 path: file.path,
@@ -303,7 +373,8 @@ export class GitService {
                 currentBlobHash: currentHash,
                 status,
                 addedLines: diffStats.added,
-                removedLines: diffStats.removed
+                removedLines: diffStats.removed,
+                patch
             });
         }
 

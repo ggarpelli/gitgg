@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { GitService } from '../services/gitService';
-import { DriftResult, DriftFile } from '../services/gitService';
+import { DriftResult, DriftFile, DriftStatus } from '../services/gitService';
 import { html } from 'diff2html';
 
 
@@ -48,6 +48,7 @@ export class DriftView {
         if (!this.panel) return;
 
         const html = await this.generateHtml(driftResult);
+        await this.panel.webview.postMessage({ command: 'setHtml', html });
         this.panel.webview.html = html;
     }
 
@@ -91,8 +92,7 @@ export class DriftView {
         let html = '';
         if (commitContent !== null && currentContent !== null) {
             // Show side-by-side diff
-            const diffResult = this.generateSideBySideDiffHtml(commitContent, currentContent, filePath, addedLines, removedLines);
-            html = diffResult;
+            html = await this.generateSideBySideDiffHtml(commitContent, currentContent, filePath, addedLines, removedLines);
         } else if (commitContent !== null && currentContent === null) {
             html = `<div class="diff-header">Commit version (file missing in working tree)</div><pre>${this.escapeHtml(commitContent)}</pre>`;
         } else if (currentContent !== null) {
@@ -130,15 +130,19 @@ export class DriftView {
     }
 
     private async generateSideBySideDiffHtml(commitContent: string, currentContent: string, filePath: string, addedLines: number = 0, removedLines: number = 0): Promise<string> {
-        // Generate unified diff using git service (same as multi-file comparison)
+        // Use pre-computed patch from driftResult (same as main.js multi-file comparison)
         const safeFilePath = filePath.replace(/\\/g, '/');
         let diff = '';
 
-        // Use git service if available, otherwise fall back to manual diff
-        if (this.gitService && this.driftResult?.commitSha) {
+        // Use pre-computed patch if available (from detectDrift)
+        const driftFile = this.driftResult?.files.find(f => f.path === filePath);
+        if (driftFile?.patch) {
+            diff = driftFile.patch;
+        } else if (this.gitService && this.driftResult?.commitSha) {
+            // Fallback: compute diff using git service
             diff = await this.gitService.getUnifiedDiff(this.driftResult.commitSha, safeFilePath);
         } else {
-            // Fallback to original method if gitService not available
+            // Last fallback: manual diff generation
             diff = this.generateUnifiedDiff(commitContent, currentContent, safeFilePath);
         }
 
@@ -386,7 +390,7 @@ export class DriftView {
         this.updateContent(newResult);
     }
 
-    private generateHtml(driftResult: DriftResult): string {
+    private async generateHtml(driftResult: DriftResult): Promise<string> {
         const crypto = require('crypto');
         const nonce = crypto.randomBytes(16).toString('base64');
         return `<!DOCTYPE html>
@@ -655,7 +659,7 @@ export class DriftView {
         </div>
     </div>
     <div class="file-list" id="fileList">
-        ${driftResult.files.map(f => this.renderFileItem(f)).join('')}
+        ${await Promise.all(driftResult.files.map(f => this.renderFileItem(f))).then(files => files.join(''))}
     </div>
     <div class="preview-section" id="previewSection">
         <div class="preview-header">
@@ -799,7 +803,7 @@ export class DriftView {
                     <span class="status-badge badge-${statusClass}">${statusLabel}</span>
                     <button class="action-btn stage-btn" data-path="${file.path}">Stage</button>
                 </div>
-                <div class="file-preview" data-path="${file.path}">
+                <div class="file-preview" id="preview-${file.path.replace(/[^a-zA-Z0-9]/g, '_')}" data-path="${file.path}">
                     ${diffContent}
                 </div>
             </div>
