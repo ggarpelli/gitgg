@@ -217,9 +217,10 @@ function updateGlobalActions() {
     const modifiedFiles = [...addedFiles, ...changedFiles, ...deletedFiles];
     const hasRestorable = restorableFiles.length > 0;
     const hasAnyChanges = modifiedFiles.length > 0;
+    const unstagedCount = modifiedFiles.filter(f => !currentStatus.staged.includes(f.filePath)).length;
 
     const allStaged = hasAnyChanges && modifiedFiles.every(f => currentStatus.staged.includes(f.filePath));
-    const noneStaged = hasAnyChanges && modifiedFiles.every(f => !currentStatus.staged.includes(f.filePath));
+    const noneStaged = hasAnyChanges && unstagedCount === modifiedFiles.length;
     const someStaged = hasAnyChanges && !allStaged && !noneStaged;
 
     let html = '';
@@ -237,8 +238,10 @@ function updateGlobalActions() {
                 html += `<button class="status-button global-unstage-btn">Unstage All</button>`;
             }
 
-            // Revert All always comes last (for non-staged files)
-            html += `<button class="status-button global-revert-btn">Revert All</button>`;
+            // Revert All always comes last (only when there are non-staged files)
+            if (unstagedCount > 0) {
+                html += `<button class="status-button global-revert-btn">Revert All</button>`;
+            }
         }
     }
 

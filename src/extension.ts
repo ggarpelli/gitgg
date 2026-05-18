@@ -617,6 +617,8 @@ async function runWebviewDiffComparison(
             const filesToRevert = allFiles.filter(file => !currentStatus.staged.includes(file));
 
             if (filesToRevert.length === 0) {
+                vscode.window.showInformationMessage('No non-staged changes to revert.');
+                await refreshWebview();
                 return;
             }
 
