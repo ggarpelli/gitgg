@@ -99,9 +99,33 @@ export class DriftView {
     }
 
     private async revertAll(): Promise<void> {
-        if (!this.driftResult) return;
-        for (const file of this.driftResult.files) {
-            if (file.status !== DriftStatus.IDENTICAL) await this.revertFile(file.path, false);
+        if (!this.driftResult || !this.gitService) return;
+        const status = await this.gitService.getStatus();
+        const filesToRevert = this.driftResult.files
+            .filter(file => file.status !== DriftStatus.IDENTICAL)
+            .filter(file => !status.staged.includes(file.path));
+
+        if (filesToRevert.length === 0) {
+            vscode.window.showInformationMessage('No unstaged files to revert.');
+            return;
+        }
+
+        const confirmation = await vscode.window.showWarningMessage(
+            `Discard local changes in ${filesToRevert.length} file${filesToRevert.length > 1 ? 's' : ''}?`,
+            { modal: true },
+            'Discard Changes'
+        );
+
+        if (confirmation !== 'Discard Changes') {
+            return;
+        }
+
+        for (const file of filesToRevert) {
+            try {
+                await this.revertFile(file.path, false);
+            } catch (error: any) {
+                vscode.window.showWarningMessage(`Failed to revert ${file.path}: ${error?.message ?? 'Unknown error'}`);
+            }
         }
         await this.refresh();
     }

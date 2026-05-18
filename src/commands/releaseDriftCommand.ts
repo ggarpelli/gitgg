@@ -19,7 +19,7 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
 
     // If no SHA provided, show branch picker then commit picker
     if (!commitSha) {
-        const selection = await showBranchPicker(gitService, repoPath);
+        const selection = await showBranchPicker(context, gitService, repoPath);
         if (!selection) return;
 
         // If user entered SHA directly, use it
@@ -58,25 +58,72 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
     });
 }
 
-async function showBranchPicker(gitService: GitService, repoPath: string): Promise<{ branch?: string; sha?: string } | undefined> {
+async function showBranchPicker(
+    context: vscode.ExtensionContext,
+    gitService: GitService,
+    repoPath: string
+): Promise<{ branch?: string; sha?: string } | undefined> {
     const branches = await gitService.getAllBranches();
     const currentBranch = await gitService.getCurrentBranch();
+    const favoriteBranches = context.globalState.get<string[]>('favoriteBranches', []);
+
+    const StarIcon = new vscode.ThemeIcon('star-full');
+    const StarEmptyIcon = new vscode.ThemeIcon('star-empty');
 
     const manualOption: vscode.QuickPickItem = {
         label: '$(git-commit) Enter SHA manually...',
         description: 'Paste or type a commit hash directly'
     };
 
-    const branchOptions: vscode.QuickPickItem[] = branches.map(branch => ({
-        label: branch === currentBranch ? `$(git-branch) ${branch} (current)` : `$(git-branch) ${branch}`,
-        description: branch === currentBranch ? 'Current branch' : undefined
-    }));
+    const quickPick = vscode.window.createQuickPick<(vscode.QuickPickItem & { branchName?: string })>();
+    quickPick.title = 'GitGG: Release Drift';
+    quickPick.placeholder = 'Select a branch to view commits, or paste a SHA directly';
 
-    const options: vscode.QuickPickItem[] = [manualOption, ...branchOptions];
+    const buildItems = (favorites: string[]) => {
+        const manualItem: vscode.QuickPickItem & { branchName?: string } = {
+            ...manualOption,
+            branchName: undefined
+        };
 
-    const selected = await vscode.window.showQuickPick(options, {
-        placeHolder: 'Select a branch to view commits, or paste a SHA directly'
+        const favoriteItems = branches
+            .filter(branch => favorites.includes(branch))
+            .map(branch => ({
+                label: branch === currentBranch ? `$(git-branch) ${branch} (current)` : `$(git-branch) ${branch}`,
+                description: branch === currentBranch ? 'Current branch' : 'Favorite',
+                buttons: [{ iconPath: StarIcon, tooltip: 'Remove from favorites' }],
+                branchName: branch
+            }));
+
+        const otherItems = branches
+            .filter(branch => !favorites.includes(branch))
+            .map(branch => ({
+                label: branch === currentBranch ? `$(git-branch) ${branch} (current)` : `$(git-branch) ${branch}`,
+                description: branch === currentBranch ? 'Current branch' : undefined,
+                buttons: [{ iconPath: StarEmptyIcon, tooltip: 'Add to favorites' }],
+                branchName: branch
+            }));
+
+        return [manualItem, ...favoriteItems, ...otherItems];
+    };
+
+    quickPick.items = buildItems(favoriteBranches);
+
+    const selected = await new Promise<(vscode.QuickPickItem & { branchName?: string }) | undefined>(resolve => {
+        quickPick.onDidAccept(() => resolve(quickPick.selectedItems[0]));
+        quickPick.onDidHide(() => resolve(undefined));
+        quickPick.onDidTriggerItemButton(async (e) => {
+            if (!e.item.branchName) return;
+            const branchName = e.item.branchName;
+            const currentFavorites = context.globalState.get<string[]>('favoriteBranches', []);
+            const nextFavorites = currentFavorites.includes(branchName)
+                ? currentFavorites.filter(branch => branch !== branchName)
+                : [...currentFavorites, branchName];
+            await context.globalState.update('favoriteBranches', nextFavorites);
+            quickPick.items = buildItems(nextFavorites);
+        });
+        quickPick.show();
     });
+    quickPick.dispose();
 
     if (!selected) return undefined;
 
@@ -111,7 +158,8 @@ async function showBranchPicker(gitService: GitService, repoPath: string): Promi
         }
     }
 
-    return { branch: selected.label.replace(/\$\(git-branch\)\s*/, '').replace(/\s\(current\)/, '') };
+    if (!selected.branchName) return undefined;
+    return { branch: selected.branchName };
 }
 
 async function showCommitPicker(repoPath: string, branch?: string): Promise<string | undefined> {
