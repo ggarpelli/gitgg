@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.5] - 2026-05-18
+
+### Added
+- 🎯 **Release Drift Detection**: New command to detect and visualize changes between current branch and any other commit/branch
+- 🔍 **Interactive Branch/Commit Selection**: Easy-to-use UI to select target branch or enter commit SHA manually
+- 📊 **Drift Visualization**: View detailed file changes in a dedicated Webview panel with staging capabilities
+- 🚀 **Quick Access**: Available via Command Palette as "Gitgg: Release Drift Detection..."
+
+### Changed
+- 📦 **Package Updates**: Updated dependencies and added new command to package.json
+- ⌨️ **Command Registration**: Added new command to extension activation events and command palette
+
+---
+
 ## [0.1.4] - 2026-05-15
 
 ### Added

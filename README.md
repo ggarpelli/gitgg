@@ -24,6 +24,8 @@ With just a couple of clicks, you can select files—or even entire folders—an
 
 -   **🔎 Flexible Comparison**: Instantly compare a single file, multiple files, or entire folders against any branch. The extension handles it all seamlessly.
 
+-   **🎯 Release Drift Detection**: Detect and visualize changes between your current branch and any other commit/branch with interactive selection and detailed reporting.
+
 -   **🧠 Smart Workflow**: To optimize your experience, Gitgg only asks for your preference (separate tabs vs. single view) when comparing a small number of files (2-5). For larger comparisons, it automatically opens the powerful single view report to prevent workspace clutter.
 
 -   **🌳 "Working Tree" Awareness**: When comparing against the current branch, Gitgg intelligently detects uncommitted changes (including deletions) and labels your version as the `(Working Tree)`, so you always know what you're looking at.

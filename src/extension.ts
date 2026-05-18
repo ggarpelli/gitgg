@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
+import { runReleaseDriftCommand } from './commands/releaseDriftCommand';
+import { GitService } from './services/gitService';
 
 type ComparisonMode = 'separate' | 'singleView';
 
@@ -260,6 +262,11 @@ export function activate(context: vscode.ExtensionContext) {
             }
         });
     }));
+
+    // Register Release Drift command
+    context.subscriptions.push(vscode.commands.registerCommand('gitgg.releaseDrift', async (commitSha?: string) => {
+        await runReleaseDriftCommand(context, commitSha);
+    }));
 }
 
 async function runWebviewDiffComparison(
@@ -457,8 +464,58 @@ async function runWebviewDiffComparison(
         }
 
         if (msg.command === 'stageFile') {
+            // Write content from comparison source to working tree first
+            try {
+                const content = await git.show([`${comparisonSource}:${msg.path}`]).catch(() => null);
+                if (content !== null) {
+                    const fullPath = path.join(repoPath, msg.path);
+                    const dir = path.dirname(fullPath);
+
+                    if (!fs.existsSync(dir)) {
+                        fs.mkdirSync(dir, { recursive: true });
+                    }
+
+                    fs.writeFileSync(fullPath, content);
+                } else {
+                    // File doesn't exist in source branch - delete from working tree
+                    const fullPath = path.join(repoPath, msg.path);
+                    try { fs.unlinkSync(fullPath); } catch (_e) { }
+                }
+            } catch (error: any) {
+                console.error('Error writing file to working tree:', error);
+            }
+
             await git.add(msg.path);
             vscode.window.showInformationMessage(`Staged: ${msg.path}`);
+            await refreshWebview();
+        }
+
+        if (msg.command === 'stageFromComparison') {
+            // Enhanced staging: write content from comparison source to working tree first, then stage
+            // This fixes the case where target branch has content that current branch doesn't have
+            const { path: filePath, sourceBranch, useSourceContent } = msg;
+
+            if (useSourceContent && sourceBranch) {
+                try {
+                    const content = await git.show([`${sourceBranch}:${filePath}`]).catch(() => null);
+                    if (content !== null) {
+                        const fullPath = path.join(repoPath, filePath);
+                        const dir = path.dirname(fullPath);
+
+                        // Ensure directory exists
+                        if (!fs.existsSync(dir)) {
+                            fs.mkdirSync(dir, { recursive: true });
+                        }
+
+                        fs.writeFileSync(fullPath, content);
+                    }
+                } catch (error: any) {
+                    console.error('Error writing file to working tree:', error);
+                }
+            }
+
+            await git.add(filePath);
+            vscode.window.showInformationMessage(`Staged: ${filePath}`);
             await refreshWebview();
         }
 
@@ -510,11 +567,32 @@ async function runWebviewDiffComparison(
             await refreshWebview();
         }
 
-        // Handle global stage all
+        // Handle global stage all - write content from comparison source first
         if (msg.command === 'stageAll') {
             const filesToStage = [...addedFiles, ...changedFiles, ...deletedFiles].map(f => f.filePath);
-            for (const file of filesToStage) {
-                await git.add(file);
+            for (const filePath of filesToStage) {
+                // Write content from comparison source to working tree first
+                try {
+                    const content = await git.show([`${comparisonSource}:${filePath}`]).catch(() => null);
+                    if (content !== null) {
+                        const fullPath = path.join(repoPath, filePath);
+                        const dir = path.dirname(fullPath);
+
+                        if (!fs.existsSync(dir)) {
+                            fs.mkdirSync(dir, { recursive: true });
+                        }
+
+                        fs.writeFileSync(fullPath, content);
+                    } else {
+                        // File doesn't exist in source branch - delete from working tree
+                        const fullPath = path.join(repoPath, filePath);
+                        try { fs.unlinkSync(fullPath); } catch (_e) { }
+                    }
+                } catch (error: any) {
+                    console.error('Error writing file to working tree:', error);
+                }
+
+                await git.add(filePath);
             }
             vscode.window.showInformationMessage(`Staged ${filesToStage.length} files`);
             await refreshWebview();
