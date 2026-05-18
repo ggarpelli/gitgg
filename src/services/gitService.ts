@@ -213,6 +213,14 @@ export class GitService {
         await this.git.reset(['HEAD', '--', filePath]);
     }
 
+
+    /**
+     * Get repository status
+     */
+    async getStatus() {
+        return this.git.status();
+    }
+
     /**
      * Determine drift status by comparing blob hashes
      */
