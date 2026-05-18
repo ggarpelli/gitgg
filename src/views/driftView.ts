@@ -105,8 +105,10 @@ export class DriftView {
     }
 
     private generateDiffHtml(commitContent: string, currentContent: string, filePath: string): string {
-        const commitLines = commitContent.split('\n');
-        const currentLines = currentContent.split('\n');
+        const normalizedCommitContent = this.normalizeTextContent(commitContent);
+        const normalizedCurrentContent = this.normalizeTextContent(currentContent);
+        const commitLines = normalizedCommitContent.split('\n');
+        const currentLines = normalizedCurrentContent.split('\n');
         let html = `<div class="diff-header">← Commit (${this.driftResult?.commitSha.substring(0, 7)}) | HEAD →</div><pre>`;
 
         const maxLines = Math.max(commitLines.length, currentLines.length);
@@ -130,6 +132,8 @@ export class DriftView {
     }
 
     private async generateSideBySideDiffHtml(commitContent: string, currentContent: string, filePath: string, addedLines: number = 0, removedLines: number = 0): Promise<string> {
+        const normalizedCommitContent = this.normalizeTextContent(commitContent);
+        const normalizedCurrentContent = this.normalizeTextContent(currentContent);
         // Use pre-computed patch from driftResult (same as main.js multi-file comparison)
         const safeFilePath = filePath.replace(/\\/g, '/');
         let diff = '';
@@ -143,7 +147,7 @@ export class DriftView {
             diff = await this.gitService.getUnifiedDiff(this.driftResult.commitSha, safeFilePath);
         } else {
             // Last fallback: manual diff generation
-            diff = this.generateUnifiedDiff(commitContent, currentContent, safeFilePath);
+            diff = this.generateUnifiedDiff(normalizedCommitContent, normalizedCurrentContent, safeFilePath);
         }
 
         // EXACT same logic as main.js multi-files
@@ -183,8 +187,10 @@ export class DriftView {
     }
 
     private generateUnifiedDiff(oldContent: string, newContent: string, filePath: string): string {
-        const oldLines = oldContent.split('\n');
-        const newLines = newContent.split('\n');
+        const normalizedOldContent = this.normalizeTextContent(oldContent);
+        const normalizedNewContent = this.normalizeTextContent(newContent);
+        const oldLines = normalizedOldContent.split('\n');
+        const newLines = normalizedNewContent.split('\n');
 
         // Simple LCS-based diff to generate hunk markers
         const hunks = this.computeDiffHunks(oldLines, newLines);
@@ -304,6 +310,10 @@ export class DriftView {
         }
 
         return lcs;
+    }
+
+    private normalizeTextContent(content: string): string {
+        return content.normalize('NFC');
     }
 
     private escapeHtml(text: string): string {

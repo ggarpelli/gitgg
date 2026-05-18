@@ -150,8 +150,11 @@ export class GitService {
      */
     async getFileContent(commitish: string, filePath: string): Promise<string | null> {
         try {
-            const content = await this.git.show([`${commitish}:${filePath}`]);
-            return content;
+            const buffer = await this.git.showBuffer([`${commitish}:${filePath}`]);
+            if (this.isBinaryBuffer(buffer)) {
+                return null;
+            }
+            return this.normalizeTextContent(buffer.toString('utf8'));
         } catch {
             return null;
         }
@@ -178,10 +181,27 @@ export class GitService {
         const fullPath = this._repoPath + '/' + filePath;
         const fs = await import('fs');
         try {
-            return await fs.promises.readFile(fullPath, 'utf8');
+            const buffer = await fs.promises.readFile(fullPath);
+            if (this.isBinaryBuffer(buffer)) {
+                return null;
+            }
+            return this.normalizeTextContent(buffer.toString('utf8'));
         } catch {
             return null;
         }
+    }
+
+    private normalizeTextContent(content: string): string {
+        return content.normalize('NFC');
+    }
+
+    private isBinaryBuffer(buffer: Buffer): boolean {
+        if (buffer.length === 0) return false;
+        const sampleSize = Math.min(buffer.length, 8000);
+        for (let i = 0; i < sampleSize; i++) {
+            if (buffer[i] === 0) return true;
+        }
+        return false;
     }
 
     /**
@@ -313,21 +333,25 @@ export class GitService {
             const safePath = filePath.replace(/\\/g, '/');
 
             if (commitContent === null) {
-                const h = await hashContent(workingTreeContent ?? '');
-                const lines = (workingTreeContent ?? '').split('\n');
+                const normalizedWorkingTreeContent = this.normalizeTextContent(workingTreeContent ?? '');
+                const h = await hashContent(normalizedWorkingTreeContent);
+                const lines = normalizedWorkingTreeContent.split('\n');
                 return `diff --git a/${safePath} b/${safePath}\nnew file mode 100644\nindex 0000000..${h}\n--- /dev/null\n+++ b/${safePath}\n@@ -0,0 +${lines.length} @@\n${lines.map(l => '+' + l).join('\n')}`;
             }
             if (workingTreeContent === null) {
-                const h = await hashContent(commitContent ?? '');
-                const lines = (commitContent ?? '').split('\n');
+                const normalizedCommitContent = this.normalizeTextContent(commitContent ?? '');
+                const h = await hashContent(normalizedCommitContent);
+                const lines = normalizedCommitContent.split('\n');
                 return `diff --git a/${safePath} b/${safePath}\ndeleted file mode 100644\nindex ${h}..0000000\n--- a/${safePath}\n+++ /dev/null\n@@ -${lines.length},0 +0,0 @@\n${lines.map(l => '-' + l).join('\n')}`;
             }
 
             // Both exist - generate simple unified diff
-            const oldLines = (commitContent ?? '').split('\n');
-            const newLines = (workingTreeContent ?? '').split('\n');
-            const oldHash = await hashContent(commitContent ?? '');
-            const newHash = await hashContent(workingTreeContent ?? '');
+            const normalizedCommitContent = this.normalizeTextContent(commitContent ?? '');
+            const normalizedWorkingTreeContent = this.normalizeTextContent(workingTreeContent ?? '');
+            const oldLines = normalizedCommitContent.split('\n');
+            const newLines = normalizedWorkingTreeContent.split('\n');
+            const oldHash = await hashContent(normalizedCommitContent);
+            const newHash = await hashContent(normalizedWorkingTreeContent);
             let diff = `diff --git a/${safePath} b/${safePath}\nindex ${oldHash}..${newHash} 100644\n--- a/${safePath}\n+++ b/${safePath}\n`;
 
             const maxLines = Math.max(oldLines.length, newLines.length);
