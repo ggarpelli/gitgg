@@ -48,12 +48,15 @@ export class DriftView {
         if (!this.panel) return;
 
         const html = await this.generateHtml(driftResult);
-        await this.panel.webview.postMessage({ command: 'setHtml', html });
         this.panel.webview.html = html;
     }
 
     private async handleMessage(msg: any): Promise<void> {
         if (!this.gitService || !this.driftResult) return;
+
+        if (!this.isValidWebviewMessage(msg)) {
+            return;
+        }
 
         switch (msg.command) {
             case 'openDiff':
@@ -74,6 +77,31 @@ export class DriftView {
             case 'revertAll':
                 await this.revertAll();
                 break;
+        }
+    }
+
+    private isValidWebviewMessage(msg: any): msg is
+        | { command: 'openDiff'; path: string; sourceType?: 'commit' | 'current' }
+        | { command: 'stageFile'; path: string }
+        | { command: 'previewFile'; path: string }
+        | { command: 'refresh' }
+        | { command: 'stageAll' }
+        | { command: 'revertAll' } {
+        if (!msg || typeof msg !== 'object' || typeof msg.command !== 'string') return false;
+        const hasPath = typeof msg.path === 'string' && msg.path.trim().length > 0;
+
+        switch (msg.command) {
+            case 'openDiff':
+                return hasPath && (!msg.sourceType || msg.sourceType === 'commit' || msg.sourceType === 'current');
+            case 'stageFile':
+            case 'previewFile':
+                return hasPath;
+            case 'refresh':
+            case 'stageAll':
+            case 'revertAll':
+                return true;
+            default:
+                return false;
         }
     }
 
@@ -671,6 +699,35 @@ export class DriftView {
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         let selectedFile = null;
+        /**
+         * Bridge contract between DriftView (extension host) and this webview:
+         *
+         * Webview -> extension:
+         * - openDiff    { command: 'openDiff', path: string }
+         * - stageFile   { command: 'stageFile', path: string }
+         * - previewFile { command: 'previewFile', path: string }
+         * - stageAll    { command: 'stageAll' }
+         * - revertAll   { command: 'revertAll' }
+         * - refresh     { command: 'refresh' }
+         *
+         * Extension -> webview:
+         * - showPreview { command: 'showPreview', path: string, html: string }
+         */
+
+        function isObject(value) {
+            return value !== null && typeof value === 'object';
+        }
+
+        function isNonEmptyString(value) {
+            return typeof value === 'string' && value.trim().length > 0;
+        }
+
+        function isValidIncomingMessage(msg) {
+            return isObject(msg)
+                && msg.command === 'showPreview'
+                && isNonEmptyString(msg.path)
+                && typeof msg.html === 'string';
+        }
 
         document.querySelectorAll('.diff-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -733,18 +790,20 @@ export class DriftView {
 
         window.addEventListener('message', event => {
             const msg = event.data;
-            if (msg.command === 'showPreview') {
-                // Show preview in per-file div, hide global preview
-                const previewId = 'preview-' + msg.path.replace(/[^a-zA-Z0-9]/g, '_');
-                const previewDiv = document.getElementById(previewId);
-                const globalSection = document.getElementById('previewSection');
-                if (previewDiv) {
-                    previewDiv.innerHTML = msg.html;
-                    previewDiv.classList.add('visible');
-                }
-                if (globalSection) {
-                    globalSection.classList.remove('visible');
-                }
+            if (!isValidIncomingMessage(msg)) {
+                return;
+            }
+
+            // Show preview in per-file div, hide global preview
+            const previewId = 'preview-' + msg.path.replace(/[^a-zA-Z0-9]/g, '_');
+            const previewDiv = document.getElementById(previewId);
+            const globalSection = document.getElementById('previewSection');
+            if (previewDiv) {
+                previewDiv.innerHTML = msg.html;
+                previewDiv.classList.add('visible');
+            }
+            if (globalSection) {
+                globalSection.classList.remove('visible');
             }
         });
     </script>
