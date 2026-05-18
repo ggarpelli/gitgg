@@ -1,4 +1,8 @@
 import simpleGit, { SimpleGit } from 'simple-git';
+import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 export enum DriftStatus {
     IDENTICAL = 'IDENTICAL',
@@ -264,9 +268,22 @@ export class GitService {
      * Get diff stats between commit and working tree (HEAD staged/index)
      */
     async getDiffStats(commitSha: string, filePath: string): Promise<{ added: number; removed: number }> {
+        let tempDir: string | null = null;
         try {
-            // Compare commit vs HEAD to get stats relative to working tree
-            const result = await this.git.raw(['diff', '--numstat', commitSha, 'HEAD', '--', filePath]);
+            const commitContent = await this.getFileContent(commitSha, filePath);
+            const workingTreeContent = await this.getWorkingTreeContent(filePath);
+
+            if (commitContent === null && workingTreeContent === null) {
+                return { added: 0, removed: 0 };
+            }
+
+            tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gitgg-diff-'));
+            const beforePath = path.join(tempDir, 'before.txt');
+            const afterPath = path.join(tempDir, 'after.txt');
+            await fs.promises.writeFile(beforePath, commitContent ?? '', 'utf8');
+            await fs.promises.writeFile(afterPath, workingTreeContent ?? '', 'utf8');
+
+            const result = await this.git.raw(['diff', '--no-index', '--numstat', beforePath, afterPath]);
             const parts = result.trim().split('\t');
             if (parts.length >= 2) {
                 const added = parseInt(parts[0], 10) || 0;
@@ -275,6 +292,10 @@ export class GitService {
             }
         } catch {
             // ignore
+        } finally {
+            if (tempDir) {
+                await fs.promises.rm(tempDir, { recursive: true, force: true });
+            }
         }
         return { added: 0, removed: 0 };
     }
@@ -358,11 +379,11 @@ export class GitService {
 
         for (const file of changedFiles) {
             const commitHash = await this.getBlobHash(commitSha, file.path);
-            // Compare against working tree (index/staged takes priority over disk for staging intent)
             const workingTreeContent = await this.getWorkingTreeContent(file.path);
-            const workingTreeHash = workingTreeContent !== null ? await this.getBlobHash('HEAD', file.path) : null;
-            // But we need actual disk hash for status determination
-            const currentHash = await this.getBlobHash('HEAD', file.path);
+            const normalizedContent = workingTreeContent?.replace(/\r\n/g, '\n');
+            const currentHash = normalizedContent !== undefined
+                ? crypto.createHash('sha1').update(normalizedContent, 'utf8').digest('hex')
+                : null;
             const status = this.determineDriftStatus(commitHash, currentHash, file.status);
             const diffStats = await this.getDiffStats(commitSha, file.path);
             const patch = await this.getUnifiedDiff(commitSha, file.path);
