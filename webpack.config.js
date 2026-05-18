@@ -6,8 +6,8 @@ const path = require('path');
 // Import the copy plugin.
 const CopyPlugin = require('copy-webpack-plugin');
 
-/**@type {import('webpack').Configuration}*/
-const config = {
+/**@type {import('webpack').Configuration[]}*/
+const extensionConfig = {
   target: 'node', // VS Code extensions run in a Node.js-context
   entry: './src/extension.ts', // The entry point of your extension
   output: {
@@ -40,10 +40,34 @@ const config = {
   plugins: [
     new CopyPlugin({
         patterns: [
-            { from: 'src/webview', to: 'webview' } // Copies from 'src/webview' to 'dist/webview'
+            { from: 'src/webview/webview.html', to: 'webview/webview.html' },
+            { from: 'src/webview/webview.css', to: 'webview/webview.css' }
         ]
     })
   ],
   devtool: 'source-map',
 };
-module.exports = config;
+
+/**@type {import('webpack').Configuration}*/
+const webviewConfig = {
+  target: 'web', // Browser context for webview
+  entry: './src/webview/main.js',
+  output: {
+    path: path.resolve(__dirname, 'dist', 'webview'),
+    filename: 'main.js',
+  },
+  resolve: {
+    extensions: ['.ts', '.js'],
+  },
+  module: {
+    rules: [
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
+      },
+    ],
+  },
+  devtool: 'source-map',
+};
+
+module.exports = [extensionConfig, webviewConfig];
