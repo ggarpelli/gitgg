@@ -265,6 +265,19 @@ export class GitService {
     }
 
     /**
+     * Compute Git blob object hash for textual content.
+     * This uses Git's blob hashing format: "blob <size>\0<content>".
+     */
+    private computeGitBlobHash(content: string): string {
+        const size = Buffer.byteLength(content, 'utf8');
+        return crypto
+            .createHash('sha1')
+            .update(`blob ${size}\0`, 'utf8')
+            .update(content, 'utf8')
+            .digest('hex');
+    }
+
+    /**
      * Get diff stats between commit and working tree (HEAD staged/index)
      */
     async getDiffStats(commitSha: string, filePath: string): Promise<{ added: number; removed: number }> {
@@ -380,9 +393,8 @@ export class GitService {
         for (const file of changedFiles) {
             const commitHash = await this.getBlobHash(commitSha, file.path);
             const workingTreeContent = await this.getWorkingTreeContent(file.path);
-            const normalizedContent = workingTreeContent?.replace(/\r\n/g, '\n');
-            const currentHash = normalizedContent !== undefined
-                ? crypto.createHash('sha1').update(normalizedContent, 'utf8').digest('hex')
+            const currentHash = workingTreeContent !== null
+                ? this.computeGitBlobHash(workingTreeContent)
                 : null;
             const status = this.determineDriftStatus(commitHash, currentHash, file.status);
             const diffStats = await this.getDiffStats(commitSha, file.path);
