@@ -1,28 +1,60 @@
-# Git repository folder
-.git/**
+# Git repository
 
-# Project assets that are hosted on GitHub
+.git/**
+.gitignore
+.gitattributes
+
+# Claude / AI workspaces
+
+.claude/**
+.openclaude/**
+.claude
+.openclaude
+
+# Project assets hosted externally
+
 images/**
 
 # Dependencies
-node_modules/
 
-# Source and old build folders
-src/
-out/
+node_modules/**
 
-# VS Code specific folders
-.vscode/
-.vscode-test/
-test/
+# Source / development folders
 
-# Configuration files
+src/**
+out/**
+coverage/**
+test/**
+tests/**
+.history/**
+
+# VSCode folders
+
+.vscode/**
+.vscode-test/**
+
+# Build / config files not needed in VSIX
+
 webpack.config.js
 tsconfig.json
 yarn.lock
 package-lock.json
-.gitignore
+.eslintrc.json
+eslint.config.mjs
+
+# Generated / temporary files
+
+*.log
 *.vsix
 *.map
-.eslintrc.json
-.openclaude/
+tmp/**
+temp/**
+
+# Documentation not needed in production package
+
+vsc-extension-quickstart.md
+
+# OS files
+
+.DS_Store
+Thumbs.db
