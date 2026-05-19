@@ -420,11 +420,12 @@ async function runWebviewDiffComparison(
         }
 
         if (msg.command === 'stageFile') {
+            const normalizedPath = String(msg.path).normalize('NFC');
             // Write content from comparison source to working tree first
             try {
-                const content = await git.show([`${comparisonSource}:${msg.path}`]).catch(() => null);
+                const content = await git.show([`${comparisonSource}:${normalizedPath}`]).catch(() => null);
                 if (content !== null) {
-                    const fullPath = path.join(repoPath, msg.path);
+                    const fullPath = path.join(repoPath, normalizedPath);
                     const dir = path.dirname(fullPath);
 
                     if (!fs.existsSync(dir)) {
@@ -434,15 +435,15 @@ async function runWebviewDiffComparison(
                     fs.writeFileSync(fullPath, content);
                 } else {
                     // File doesn't exist in source branch - delete from working tree
-                    const fullPath = path.join(repoPath, msg.path);
+                    const fullPath = path.join(repoPath, normalizedPath);
                     try { fs.unlinkSync(fullPath); } catch (_e) { }
                 }
             } catch (error: any) {
                 console.error('Error writing file to working tree:', error);
             }
 
-            await git.add(msg.path);
-            vscode.window.showInformationMessage(`Staged: ${msg.path}`);
+            await git.add(normalizedPath);
+            vscode.window.showInformationMessage(`Staged: ${normalizedPath}`);
             await refreshWebview();
         }
 
@@ -476,50 +477,52 @@ async function runWebviewDiffComparison(
         }
 
         if (msg.command === 'unstageFile') {
-            await git.reset(['HEAD', '--', msg.path]);
-            vscode.window.showInformationMessage(`Unstaged: ${msg.path}`);
+            const normalizedPath = String(msg.path).normalize('NFC');
+            await git.reset(['HEAD', '--', normalizedPath]);
+            vscode.window.showInformationMessage(`Unstaged: ${normalizedPath}`);
             await refreshWebview();
         }
 
         if (msg.command === 'revertFile') {
+            const normalizedPath = String(msg.path).normalize('NFC');
             const currentStatus = await git.status();
-            const isStaged = currentStatus.staged.includes(msg.path);
-            const isUntracked = currentStatus.not_added.includes(msg.path);
+            const isStaged = currentStatus.staged.includes(normalizedPath);
 
             if (isStaged) {
-                await git.reset(['HEAD', '--', msg.path]);
+                await git.reset(['HEAD', '--', normalizedPath]);
             }
 
-            { 
-                const confirmation = await vscode.window.showWarningMessage(
-                    `Discard local changes in ${msg.path}? You can restore them from this panel until it is closed.`,
-                    { modal: true },
-                    'Discard Changes'
-                );
+            const confirmation = await vscode.window.showWarningMessage(
+                `Discard local changes in ${normalizedPath}? You can restore them from this panel until it is closed.`,
+                { modal: true },
+                'Discard Changes'
+            );
 
-                if (confirmation !== 'Discard Changes') {
-                    return;
-                }
-
-                const contentBeforeRevert = await readWorkspaceFileIfExists(msg.path);
-
-                if (isUntracked) {
-                    const fullPath = path.join(repoPath, msg.path);
-                    try { await fs.promises.unlink(fullPath); } catch (_e) { }
-                } else {
-                    await git.checkout(['--', msg.path]);
-                }
-
-                const revertedToContent = await readWorkspaceFileIfExists(msg.path);
-                restoreBackups.set(msg.path, {
-                    filePath: msg.path,
-                    content: contentBeforeRevert,
-                    revertedToContent,
-                    timestamp: Date.now()
-                });
-                removeFilesFromChanges([msg.path]);
-                vscode.window.showInformationMessage(`Reverted: ${msg.path}`);
+            if (confirmation !== 'Discard Changes') {
+                return;
             }
+
+            const refreshedStatus = await git.status();
+            const isUntracked = refreshedStatus.not_added.includes(normalizedPath) ||
+                refreshedStatus.files.some(f => f.path === normalizedPath && f.working_dir === '?');
+            const contentBeforeRevert = await readWorkspaceFileIfExists(normalizedPath);
+
+            if (isUntracked) {
+                const fullPath = path.join(repoPath, normalizedPath);
+                try { await fs.promises.unlink(fullPath); } catch (_e) { }
+            } else {
+                await git.checkout(['--', normalizedPath]);
+            }
+
+            const revertedToContent = await readWorkspaceFileIfExists(normalizedPath);
+            restoreBackups.set(normalizedPath, {
+                filePath: normalizedPath,
+                content: contentBeforeRevert,
+                revertedToContent,
+                timestamp: Date.now()
+            });
+            removeFilesFromChanges([normalizedPath]);
+            vscode.window.showInformationMessage(`Reverted: ${normalizedPath}`);
 
             await refreshWebview();
         }

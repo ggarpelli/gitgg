@@ -156,7 +156,8 @@ async function showCommitPicker(context: vscode.ExtensionContext, repoPath: stri
             return {
                 label: message.substring(0, 70) + (message.length > 70 ? '...' : ''),
                 description: sha.substring(0, 7),
-                sha
+                sha,
+                buttons: [{ iconPath: StarEmptyIcon, tooltip: 'Add to favorites' }]
             };
         });
 
