@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.9] - 2026-05-19
+
+### Added
+- ⭐ **Save Favorite Hash During Manual Input**: When entering a commit SHA manually, Gitgg now offers an immediate option to save that hash as a favorite with a custom alias.
+
+### Changed
+- 🧭 **Release Drift UX Improvement**: Manual SHA workflows are now faster by removing the need to browse branch history before favoriting a known hash.
+
+---
+
 ## [0.1.8] - 2026-05-18
 
 ### Added

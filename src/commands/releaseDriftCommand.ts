@@ -19,6 +19,40 @@ interface FavoriteCommit {
     alias: string;
 }
 
+async function promptToSaveFavoriteHash(
+    context: vscode.ExtensionContext,
+    sha: string
+): Promise<void> {
+    const favorites = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
+    if (favorites.some(f => f.sha === sha)) return;
+
+    const saveChoice = await vscode.window.showQuickPick(
+        [
+            { label: 'Yes, save as favorite' },
+            { label: 'No, continue without saving' }
+        ],
+        { placeHolder: `Save ${sha.substring(0, 7)} as a favorite hash?` }
+    );
+
+    if (!saveChoice || !saveChoice.label.startsWith('Yes')) return;
+
+    const aliasInput = await vscode.window.showInputBox({
+        prompt: 'Favorite name (alias)',
+        placeHolder: `e.g., release-${sha.substring(0, 7)}`,
+        value: sha.substring(0, 7),
+        validateInput: (value) => {
+            if (!value || !value.trim()) return 'Alias cannot be empty';
+            return null;
+        }
+    });
+
+    if (!aliasInput) return;
+
+    const updatedFavorites = [...favorites, { sha, alias: aliasInput.trim() }];
+    await context.globalState.update(FAVORITE_COMMITS_KEY, updatedFavorites);
+    vscode.window.showInformationMessage(`Hash ${sha.substring(0, 7)} saved as "${aliasInput.trim()}".`);
+}
+
 export async function runReleaseDriftCommand(context: vscode.ExtensionContext, commitSha?: string): Promise<void> {
     const repoPath = getRepoPath();
     if (!repoPath) {
@@ -110,10 +144,13 @@ async function showBranchPicker(context: vscode.ExtensionContext, gitService: Gi
         // Get full SHA if short hash was provided
         try {
             const git = simpleGit({ baseDir: repoPath });
-            const fullSha = await git.raw(['rev-parse', shaInput.trim()]);
-            return { sha: fullSha.trim() };
+            const fullSha = (await git.raw(['rev-parse', shaInput.trim()])).trim();
+            await promptToSaveFavoriteHash(context, fullSha);
+            return { sha: fullSha };
         } catch {
-            return { sha: shaInput.trim() };
+            const normalizedSha = shaInput.trim();
+            await promptToSaveFavoriteHash(context, normalizedSha);
+            return { sha: normalizedSha };
         }
     }
 
@@ -244,10 +281,13 @@ async function showCommitPicker(context: vscode.ExtensionContext, repoPath: stri
 
         // Get full SHA if short hash was provided
         try {
-            const fullSha = await git.raw(['rev-parse', shaInput.trim()]);
-            return fullSha.trim();
+            const fullSha = (await git.raw(['rev-parse', shaInput.trim()])).trim();
+            await promptToSaveFavoriteHash(context, fullSha);
+            return fullSha;
         } catch {
-            return shaInput.trim();
+            const normalizedSha = shaInput.trim();
+            await promptToSaveFavoriteHash(context, normalizedSha);
+            return normalizedSha;
         }
     }
 

@@ -26,6 +26,8 @@ With just a couple of clicks, you can select files—or even entire folders—an
 
 -   **🎯 Release Drift Detection**: Detect and visualize changes between your current branch and any other commit/branch with interactive selection and detailed reporting.
 
+-   **⭐ Favorite Hashes on the Fly**: While typing a commit SHA manually, you can instantly save it as a favorite with an alias—no need to navigate branch history first.
+
 -   **🧠 Smart Workflow**: To optimize your experience, Gitgg only asks for your preference (separate tabs vs. single view) when comparing a small number of files (2-5). For larger comparisons, it automatically opens the powerful single view report to prevent workspace clutter.
 
 -   **🌳 "Working Tree" Awareness**: When comparing against the current branch, Gitgg intelligently detects uncommitted changes (including deletions) and labels your version as the `(Working Tree)`, so you always know what you're looking at.
