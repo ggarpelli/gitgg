@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { GitService } from '../services/gitService';
 import { DriftResult } from '../services/gitService';
 import { DriftView } from '../views/driftView';
-import simpleGit, { SimpleGit } from 'simple-git';
+import simpleGit from 'simple-git';
+import { pickBranchWithFavorites } from '../ui/branchPicker';
 
 interface CommitItem extends vscode.QuickPickItem {
     sha: string;
@@ -19,7 +20,7 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
 
     // If no SHA provided, show branch picker then commit picker
     if (!commitSha) {
-        const selection = await showBranchPicker(gitService, repoPath);
+        const selection = await showBranchPicker(context, gitService, repoPath);
         if (!selection) return;
 
         // If user entered SHA directly, use it
@@ -58,30 +59,21 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
     });
 }
 
-async function showBranchPicker(gitService: GitService, repoPath: string): Promise<{ branch?: string; sha?: string } | undefined> {
+async function showBranchPicker(context: vscode.ExtensionContext, gitService: GitService, repoPath: string): Promise<{ branch?: string; sha?: string } | undefined> {
     const branches = await gitService.getAllBranches();
     const currentBranch = await gitService.getCurrentBranch();
 
-    const manualOption: vscode.QuickPickItem = {
-        label: '$(git-commit) Enter SHA manually...',
-        description: 'Paste or type a commit hash directly'
-    };
-
-    const branchOptions: vscode.QuickPickItem[] = branches.map(branch => ({
-        label: branch === currentBranch ? `$(git-branch) ${branch} (current)` : `$(git-branch) ${branch}`,
-        description: branch === currentBranch ? 'Current branch' : undefined
-    }));
-
-    const options: vscode.QuickPickItem[] = [manualOption, ...branchOptions];
-
-    const selected = await vscode.window.showQuickPick(options, {
+    const pickMode = await vscode.window.showQuickPick([
+        { label: '$(git-branch) Select branch', value: 'branch' },
+        { label: '$(git-commit) Enter SHA manually...', value: 'sha' }
+    ], {
         placeHolder: 'Select a branch to view commits, or paste a SHA directly'
     });
 
-    if (!selected) return undefined;
+    if (!pickMode) return undefined;
 
     // If manual option selected, ask for SHA
-    if (selected.label.includes('Enter SHA manually')) {
+    if (pickMode.value === 'sha') {
         const shaInput = await vscode.window.showInputBox({
             prompt: 'Enter commit SHA (full or short hash)',
             placeHolder: 'e.g., abc1234 or abc1234567890abcdef',
@@ -111,7 +103,19 @@ async function showBranchPicker(gitService: GitService, repoPath: string): Promi
         }
     }
 
-    return { branch: selected.label.replace(/\$\(git-branch\)\s*/, '').replace(/\s\(current\)/, '') };
+    const decoratedBranches = branches.map(branch =>
+        branch === currentBranch ? `${branch} (current)` : branch
+    );
+
+    const selectedBranch = await pickBranchWithFavorites(
+        context,
+        decoratedBranches,
+        'Select a branch (Favorites ⭐️ are listed first)'
+    );
+
+    if (!selectedBranch) return undefined;
+
+    return { branch: selectedBranch.replace(/\s\(current\)$/, '') };
 }
 
 async function showCommitPicker(repoPath: string, branch?: string): Promise<string | undefined> {
