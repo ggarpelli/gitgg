@@ -7,6 +7,16 @@ import { pickBranchWithFavorites } from '../ui/branchPicker';
 
 interface CommitItem extends vscode.QuickPickItem {
     sha: string;
+    buttons?: vscode.QuickInputButton[];
+}
+
+const FAVORITE_COMMITS_KEY = 'favoriteCommits';
+const StarIcon = new vscode.ThemeIcon('star-full');
+const StarEmptyIcon = new vscode.ThemeIcon('star-empty');
+
+interface FavoriteCommit {
+    sha: string;
+    alias: string;
 }
 
 export async function runReleaseDriftCommand(context: vscode.ExtensionContext, commitSha?: string): Promise<void> {
@@ -27,7 +37,7 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
         if (selection.sha) {
             commitSha = selection.sha;
         } else if (selection.branch) {
-            const selectedSha = await showCommitPicker(repoPath, selection.branch);
+            const selectedSha = await showCommitPicker(context, repoPath, selection.branch);
             if (!selectedSha) return;
             commitSha = selectedSha;
         }
@@ -118,7 +128,7 @@ async function showBranchPicker(context: vscode.ExtensionContext, gitService: Gi
     return { branch: selectedBranch.replace(/\s\(current\)$/, '') };
 }
 
-async function showCommitPicker(repoPath: string, branch?: string): Promise<string | undefined> {
+async function showCommitPicker(context: vscode.ExtensionContext, repoPath: string, branch?: string): Promise<string | undefined> {
     // Get recent commits using git log, filtered by branch if specified
     const git = simpleGit({ baseDir: repoPath });
     const args = ['log', '--format=%H|%s', '-n', '50'];
@@ -126,6 +136,16 @@ async function showCommitPicker(repoPath: string, branch?: string): Promise<stri
         args.push(branch);
     }
     const result = await git.raw(args);
+
+
+    const favorites = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
+    const favoriteItems: CommitItem[] = favorites.map(f => ({
+        label: `$(star-full) ${f.alias}`,
+        description: f.sha.substring(0, 7),
+        detail: f.sha,
+        sha: f.sha,
+        buttons: [{ iconPath: StarIcon, tooltip: "Remove from favorites" }]
+    }));
 
     const commits: CommitItem[] = result.trim().split('\n')
         .filter((line: string) => line.includes('|'))
@@ -147,13 +167,34 @@ async function showCommitPicker(repoPath: string, branch?: string): Promise<stri
         sha: ''
     };
 
-    const options = [manualOption, ...commits];
+    const options = [manualOption, ...favoriteItems, ...commits.filter(c => !favorites.some(f => f.sha === c.sha))];
 
-    const selected = await vscode.window.showQuickPick(options, {
-        placeHolder: 'Select a commit to compare against current branch'
+    const pick = vscode.window.createQuickPick<CommitItem>();
+    pick.items = options;
+    pick.placeholder = 'Select a commit to compare against current branch';
+
+    const selected = await new Promise<CommitItem | undefined>((resolve) => {
+        pick.onDidAccept(() => { resolve(pick.selectedItems[0]); pick.hide(); });
+        pick.onDidTriggerItemButton(async ({ item }) => {
+            let current = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
+            const existing = current.find(f => f.sha === item.sha);
+            if (existing) {
+                current = current.filter(f => f.sha !== item.sha);
+            } else {
+                const alias = await vscode.window.showInputBox({ prompt: "Favorite name (alias)", value: item.label.replace(/^\$\(star-full\)\s*/, '') });
+                if (!alias) return;
+                current.push({ sha: item.sha, alias: alias.trim() || item.sha.substring(0, 7) });
+            }
+            await context.globalState.update(FAVORITE_COMMITS_KEY, current);
+            pick.items = [manualOption, ...current.map(f => ({ label: `$(star-full) ${f.alias}`, description: f.sha.substring(0,7), detail: f.sha, sha: f.sha, buttons: [{ iconPath: StarIcon, tooltip: "Remove from favorites" }] })), ...commits.filter(c => !current.some(f => f.sha === c.sha)).map(c => ({...c, buttons:[{ iconPath: StarEmptyIcon, tooltip:"Add to favorites" }]}))];
+        });
+        pick.onDidHide(() => { resolve(undefined); pick.dispose(); });
+        pick.show();
     });
 
     if (!selected) return undefined;
+
+    if (selected.sha && selected.sha !== "") return selected.sha;
 
     // If manual option selected, ask for SHA
     if (selected.sha === '') {

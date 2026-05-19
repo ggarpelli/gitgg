@@ -278,7 +278,7 @@ async function runWebviewDiffComparison(
     const allFilesData: FileData[] = [];
     for (const uri of urisToCompare) {
         if (token.isCancellationRequested) { return; }
-        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
+        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/').normalize('NFC');
         const isUntracked = status.not_added.includes(relativePath);
 
         let patch: string | null = null;
@@ -396,15 +396,16 @@ async function runWebviewDiffComparison(
 
     panel.webview.onDidReceiveMessage(async msg => {
         if (msg.command === 'openDiff') {
-            const isDeleted = status.deleted.includes(msg.path);
+            const normalizedPath = String(msg.path).normalize('NFC');
+            const isDeleted = status.deleted.includes(normalizedPath);
 
             let tempContent = diffCache[msg.path];
             if (!tempContent) {
-                tempContent = await git.show([`${comparisonSource}:${msg.path}`]).catch(() => '');
+                tempContent = await git.show([`${comparisonSource}:${normalizedPath}`]).catch(() => '');
                 diffCache[msg.path] = tempContent;
             }
 
-            const tempFilePath = path.join(os.tmpdir(), `gitgg-${path.basename(msg.path)}-${Date.now()}`);
+            const tempFilePath = path.join(os.tmpdir(), `gitgg-${path.basename(normalizedPath)}-${Date.now()}`);
             fs.writeFileSync(tempFilePath, tempContent);
             createdTempFiles.add(tempFilePath);
             panelTempFiles.push(tempFilePath);
@@ -412,9 +413,9 @@ async function runWebviewDiffComparison(
 
             const rightUri = isDeleted
                 ? leftUri.with({ scheme: 'untitled' })
-                : vscode.Uri.file(path.join(repoPath, msg.path));
+                : vscode.Uri.file(path.join(repoPath, normalizedPath));
 
-            const diffTitle = `Comparing ${path.basename(msg.path)} (${targetBranch}) ↔ (${localFileLabel})`;
+            const diffTitle = `Comparing ${path.basename(normalizedPath)} (${targetBranch}) ↔ (${localFileLabel})`;
             await vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, diffTitle, { preview: false });
         }
 
@@ -487,8 +488,9 @@ async function runWebviewDiffComparison(
 
             if (isStaged) {
                 await git.reset(['HEAD', '--', msg.path]);
-                vscode.window.showInformationMessage(`Unstaged: ${msg.path}`);
-            } else {
+            }
+
+            { 
                 const confirmation = await vscode.window.showWarningMessage(
                     `Discard local changes in ${msg.path}? You can restore them from this panel until it is closed.`,
                     { modal: true },
@@ -568,14 +570,7 @@ async function runWebviewDiffComparison(
         if (msg.command === 'revertAll') {
             const currentStatus = await git.status();
             const allFiles = [...addedFiles, ...changedFiles, ...deletedFiles].map(f => f.filePath);
-            // Revert only NON-staged files
-            const filesToRevert = allFiles.filter(file => !currentStatus.staged.includes(file));
-
-            if (filesToRevert.length === 0) {
-                vscode.window.showInformationMessage('No non-staged changes to revert.');
-                await refreshWebview();
-                return;
-            }
+            const filesToRevert = allFiles;
 
             const confirmation = await vscode.window.showWarningMessage(
                 `Discard local changes in ${filesToRevert.length} file${filesToRevert.length > 1 ? 's' : ''}? You can restore them from this panel until it is closed.`,
@@ -591,6 +586,9 @@ async function runWebviewDiffComparison(
             const successfullyRevertedFiles: string[] = [];
 
             for (const file of filesToRevert) {
+                if (currentStatus.staged.includes(file)) {
+                    await git.reset(['HEAD', '--', file]).catch(() => {});
+                }
                 const contentBeforeRevert = await readWorkspaceFileIfExists(file);
 
                 try {
@@ -726,7 +724,7 @@ async function runNativeDiffComparison(
         processed++;
         progress.report({ increment: 75 + (processed / urisToCompare.length * 25), message: `Comparing ${path.basename(uri.fsPath)}...` });
 
-        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
+        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/').normalize('NFC');
         const isDeleted = status.deleted.includes(relativePath);
 
         const fileContent = await git.show([`${comparisonSource}:${relativePath}`]).catch(() => '');
