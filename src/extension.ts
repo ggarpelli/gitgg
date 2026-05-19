@@ -27,6 +27,23 @@ interface RestoreBackup {
 
 const createdTempFiles = new Set<string>();
 
+function resolveGitPathFromStatus(relativePath: string, status: StatusResult): string {
+    const allKnownPaths = new Set<string>([
+        ...status.modified,
+        ...status.not_added,
+        ...status.deleted,
+        ...status.staged,
+        ...status.files.map(f => f.path)
+    ]);
+    const normalized = relativePath.normalize('NFC');
+    for (const knownPath of allKnownPaths) {
+        if (knownPath.normalize('NFC') === normalized) {
+            return knownPath;
+        }
+    }
+    return relativePath;
+}
+
 async function resolveUrisToFiles(uris: vscode.Uri[]): Promise<vscode.Uri[]> {
     const fileUris: Set<vscode.Uri> = new Set();
 
@@ -175,7 +192,8 @@ export function activate(context: vscode.ExtensionContext) {
 
                 if (targetBranch === currentBranch) {
                     const hasWorkingTreeChanges = uniqueUris.some(uri => {
-                        const relativePath = path.relative(repoPath!, uri.fsPath).replace(/\\/g, '/');
+                        const rawRelativePath = path.relative(repoPath!, uri.fsPath).replace(/\\/g, '/');
+                        const relativePath = resolveGitPathFromStatus(rawRelativePath, status);
                         const isModified = status.modified.includes(relativePath);
                         const isUntracked = status.not_added.includes(relativePath);
                         const isDeleted = status.deleted.includes(relativePath);
@@ -278,7 +296,8 @@ async function runWebviewDiffComparison(
     const allFilesData: FileData[] = [];
     for (const uri of urisToCompare) {
         if (token.isCancellationRequested) { return; }
-        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/').normalize('NFC');
+        const rawRelativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
+        const relativePath = resolveGitPathFromStatus(rawRelativePath, status);
         const isUntracked = status.not_added.includes(relativePath);
 
         let patch: string | null = null;
@@ -727,7 +746,8 @@ async function runNativeDiffComparison(
         processed++;
         progress.report({ increment: 75 + (processed / urisToCompare.length * 25), message: `Comparing ${path.basename(uri.fsPath)}...` });
 
-        const relativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/').normalize('NFC');
+        const rawRelativePath = path.relative(repoPath, uri.fsPath).replace(/\\/g, '/');
+        const relativePath = resolveGitPathFromStatus(rawRelativePath, status);
         const isDeleted = status.deleted.includes(relativePath);
 
         const fileContent = await git.show([`${comparisonSource}:${relativePath}`]).catch(() => '');

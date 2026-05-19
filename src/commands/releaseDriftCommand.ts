@@ -73,11 +73,15 @@ async function showBranchPicker(context: vscode.ExtensionContext, gitService: Gi
     const branches = await gitService.getAllBranches();
     const currentBranch = await gitService.getCurrentBranch();
 
-    const pickMode = await vscode.window.showQuickPick([
+    const favoriteCommits = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
+    const modeOptions = [
         { label: '$(git-branch) Select branch', value: 'branch' },
-        { label: '$(git-commit) Enter SHA manually...', value: 'sha' }
-    ], {
-        placeHolder: 'Select a branch to view commits, or paste a SHA directly'
+        { label: '$(git-commit) Enter SHA manually...', value: 'sha' },
+        { label: '$(folder-library) Favorite Hashes', value: 'favorites' }
+    ];
+
+    const pickMode = await vscode.window.showQuickPick(modeOptions, {
+        placeHolder: 'Select a branch, paste a SHA, or open favorite hashes'
     });
 
     if (!pickMode) return undefined;
@@ -111,6 +115,26 @@ async function showBranchPicker(context: vscode.ExtensionContext, gitService: Gi
         } catch {
             return { sha: shaInput.trim() };
         }
+    }
+
+    if (pickMode.value === 'favorites') {
+        if (favoriteCommits.length === 0) {
+            vscode.window.showInformationMessage('No favorite hashes saved yet.');
+            return undefined;
+        }
+
+        const selectedFavorite = await vscode.window.showQuickPick(
+            favoriteCommits.map(f => ({
+                label: `$(star-full) ${f.alias}`,
+                description: f.sha.substring(0, 7),
+                detail: f.sha,
+                sha: f.sha
+            })),
+            { placeHolder: 'Select a favorite hash' }
+        );
+
+        if (!selectedFavorite) return undefined;
+        return { sha: selectedFavorite.sha };
     }
 
     const decoratedBranches = branches.map(branch =>
