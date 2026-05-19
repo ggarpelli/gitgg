@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { runReleaseDriftCommand } from './commands/releaseDriftCommand';
 import { GitService } from './services/gitService';
+import { pickBranchWithFavorites } from './ui/branchPicker';
 
 type ComparisonMode = 'separate' | 'singleView';
 
@@ -151,54 +152,11 @@ export function activate(context: vscode.ExtensionContext) {
                 const branches = await git.branchLocal();
                 const currentBranch = branches.current;
 
-                const favoriteBranches = context.globalState.get<string[]>('favoriteBranches', []);
-
-                const buildQuickPickItems = (favorites: string[]) => {
-                    const favoriteItems = branches.all
-                        .filter(b => favorites.includes(b))
-                        .map(b => ({
-                            label: `$(star-full) ${b}`,
-                            branchName: b,
-                            buttons: [{ iconPath: StarIcon, tooltip: "Remove from favorites" }]
-                        }));
-
-                    const otherItems = branches.all
-                        .filter(b => !favorites.includes(b))
-                        .map(b => ({
-                            label: b,
-                            branchName: b,
-                            buttons: [{ iconPath: StarEmptyIcon, tooltip: "Add to favorites" }]
-                        }));
-
-                    return [...favoriteItems, ...otherItems];
-                };
-
-                const targetBranch = await new Promise<string | undefined>(resolve => {
-                    const quickPick = vscode.window.createQuickPick();
-                    quickPick.items = buildQuickPickItems(favoriteBranches);
-                    quickPick.placeholder = `Compare with branch... (Favorites ⭐️ are listed first)`;
-                    quickPick.onDidAccept(() => {
-                        const selection = quickPick.selectedItems[0] as any;
-                        resolve(selection?.branchName);
-                        quickPick.hide();
-                    });
-                    quickPick.onDidTriggerItemButton(async e => {
-                        const branchName = (e.item as any).branchName;
-                        let currentFavorites = context.globalState.get<string[]>('favoriteBranches', []);
-                        if (currentFavorites.includes(branchName)) {
-                            currentFavorites = currentFavorites.filter(b => b !== branchName);
-                        } else {
-                            currentFavorites.push(branchName);
-                        }
-                        await context.globalState.update('favoriteBranches', currentFavorites);
-                        quickPick.items = buildQuickPickItems(currentFavorites);
-                    });
-                    quickPick.onDidHide(() => {
-                        quickPick.dispose();
-                        resolve(undefined);
-                    });
-                    quickPick.show();
-                });
+                const targetBranch = await pickBranchWithFavorites(
+                    context,
+                    branches.all,
+                    'Compare with branch... (Favorites ⭐️ are listed first)'
+                );
 
                 if (token.isCancellationRequested || !targetBranch) { return; }
 
