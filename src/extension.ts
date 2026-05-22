@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { runReleaseDriftCommand } from './commands/releaseDriftCommand';
+import { runPRComparisonCommand } from './commands/prComparisonCommand';
 import { GitService } from './services/gitService';
 import { pickBranchWithFavorites } from './ui/branchPicker';
 
@@ -224,6 +225,11 @@ export function activate(context: vscode.ExtensionContext) {
     // Register Release Drift command
     context.subscriptions.push(vscode.commands.registerCommand('gitgg.releaseDrift', async (commitSha?: string) => {
         await runReleaseDriftCommand(context, commitSha);
+    }));
+
+    // Register PR Comparison command
+    context.subscriptions.push(vscode.commands.registerCommand('gitgg.prComparison', async () => {
+        await runPRComparisonCommand(context);
     }));
 }
 

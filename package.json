@@ -2,7 +2,7 @@
     "name": "GuilhermeGarpelli",
     "displayName": "Gitgg - Branch File Diff",
     "description": "An extension for comparing files across different Git branches.",
-    "version": "0.1.9",
+    "version": "0.2.0",
     "publisher": "ggarpelli",
     "icon": "icon.png",
     "repository": {
@@ -17,7 +17,8 @@
     ],
     "activationEvents": [
         "onCommand:gitgg.compareFile",
-        "onCommand:gitgg.releaseDrift"
+        "onCommand:gitgg.releaseDrift",
+        "onCommand:gitgg.prComparison"
     ],
     "main": "./dist/extension.js",
     "contributes": {
@@ -29,6 +30,10 @@
             {
                 "command": "gitgg.releaseDrift",
                 "title": "Gitgg: Release Drift Detection..."
+            },
+            {
+                "command": "gitgg.prComparison",
+                "title": "Gitgg: Compare PR Changes..."
             }
         ],
         "menus": {

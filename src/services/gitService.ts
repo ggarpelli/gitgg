@@ -1,8 +1,8 @@
 import simpleGit, { SimpleGit } from 'simple-git';
-import crypto from 'crypto';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 export enum DriftStatus {
     IDENTICAL = 'IDENTICAL',
@@ -165,11 +165,12 @@ export class GitService {
      * Write content to the working tree
      */
     async writeToWorkingTree(filePath: string, content: string): Promise<void> {
-        const fullPath = this._repoPath + '/' + filePath;
-        const fs = await import('fs');
+        const pathModule = await import('path');
+        const fullPath = pathModule.join(this._repoPath, filePath);
 
         // Ensure directory exists
-        const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+        const dir = pathModule.dirname(fullPath);
+        const fs = await import('fs');
         await fs.promises.mkdir(dir, { recursive: true });
 
         await fs.promises.writeFile(fullPath, content, { encoding: 'utf8' });
@@ -179,7 +180,8 @@ export class GitService {
      * Get file content from working tree (real disk state, including unstaged changes)
      */
     async getWorkingTreeContent(filePath: string): Promise<string | null> {
-        const fullPath = this._repoPath + '/' + filePath;
+        const pathModule = await import('path');
+        const fullPath = pathModule.join(this._repoPath, filePath);
         const fs = await import('fs');
         try {
             return await fs.promises.readFile(fullPath, 'utf8');
@@ -192,7 +194,8 @@ export class GitService {
      * Delete a file from working tree
      */
     async deleteFile(filePath: string): Promise<void> {
-        const fullPath = this._repoPath + '/' + filePath;
+        const pathModule = await import('path');
+        const fullPath = pathModule.join(this._repoPath, filePath);
         const fs = await import('fs');
         try {
             await fs.promises.unlink(fullPath);
@@ -377,6 +380,26 @@ export class GitService {
     }
 
     /**
+     * Get unified diff for a file between two refs (branches, commits, etc.)
+     */
+    async getDiffBetweenRefs(oldRef: string, newRef: string, filePath: string): Promise<string> {
+        try {
+            const result = await this.git.raw([
+                'diff',
+                '--unified=3',
+                oldRef,
+                newRef,
+                '--',
+                filePath
+            ]);
+            return result || '';
+        } catch (error) {
+            console.error(`Failed to get diff between ${oldRef} and ${newRef} for ${filePath}:`, error);
+            return '';
+        }
+    }
+
+    /**
      * Detect drift between a commit and current working tree (not HEAD)
      */
     async detectDrift(commitSha: string): Promise<DriftResult> {
@@ -432,6 +455,18 @@ export class GitService {
     }
 
     /**
+     * Get commit SHA for a branch/ref
+     */
+    async getCommitSha(ref: string): Promise<string> {
+        try {
+            const result = await this.git.raw(['rev-parse', ref]);
+            return result.trim();
+        } catch (error) {
+            throw new Error(`Failed to get commit SHA for ${ref}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
      * Check if current HEAD is behind/ahead of a branch
      */
     async getBranchDiff(baseBranch: string): Promise<{ ahead: number; behind: number }> {
@@ -441,6 +476,20 @@ export class GitService {
             return { ahead, behind };
         } catch {
             return { ahead: 0, behind: 0 };
+        }
+    }
+
+    /**
+     * Get changed files between two refs (branches/commits)
+     * Returns files that are different between fromRef and toRef
+     */
+    async getChangedFilesBetweenRefs(fromRef: string, toRef: string): Promise<string[]> {
+        try {
+            const result = await this.git.raw(['diff', '--name-only', fromRef, toRef]);
+            return result.trim().split('\n').filter(Boolean);
+        } catch (error) {
+            console.error('Error getting changed files between refs:', error);
+            return [];
         }
     }
 }

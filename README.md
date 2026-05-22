@@ -38,6 +38,8 @@ With just a couple of clicks, you can select files—or even entire folders—an
 
 -   **🔄 Smart File Management**: Built-in source control panel with dynamic action buttons - Stage All, Unstage All, Revert All, and Restore All Changes. Revert individual files with automatic backup/restore support until you close the panel.
 
+-   **🎯 PR Comparison Validation**: Before promoting code, validate that your changes match the target environment. Automatically detects your promotion branch and compares against UAT or any other environment to ensure backpromotion safety.
+
 ## 🎬 Demo in Action
 
 ### Comparing a Single File

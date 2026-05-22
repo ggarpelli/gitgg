@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-05-22
+
+### Added
+- 🚀 **PR Comparison Feature**: New command to validate PR changes against an environment branch
+- 📊 **Smart File Classification**: Files are classified as IDENTICAL, DIFFERENT, or MISSING_IN_ENVIRONMENT
+- 🔍 **Accurate Line Counts**: Using native `git diff` for precise added/removed line statistics
+- 🌲 **Local Branch Support**: Works with both local and remote branches (auto-detects)
+- 🎨 **Status Icons**: Visual indicators for file status (✓ IDENTICAL, ~ DIFFERENT, - MISSING)
+
+### Changed
+- 🔧 **Improved Path Handling**: Fixed path concatenation issues on Windows using `path.join`
+- 📦 **New PRComparisonView**: Dedicated view for PR comparison with optimized UI
+
+### Fixed
+- 🐛 **TypeScript Error**: Fixed `error.message` on unknown error type in `getCommitSha`
+
+---
+
 ## [0.1.9] - 2026-05-19
 
 ### Added
