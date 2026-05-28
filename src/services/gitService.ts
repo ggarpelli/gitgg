@@ -63,10 +63,14 @@ export class GitService {
     async getCommitParents(sha: string): Promise<string[]> {
         const result = await this.git.raw(['rev-list', '--parents', '--format=%P', '-n', '1', sha]);
         const lines = result.trim().split('\n');
-        if (lines.length < 2) return [];
+        if (lines.length < 2) {
+            return [];
+        }
 
         const parentLine = lines[1].trim();
-        if (!parentLine) return [];
+        if (!parentLine) {
+            return [];
+        }
         return parentLine.split(' ').filter(s => s.length > 0);
     }
 
@@ -112,7 +116,9 @@ export class GitService {
         const lines = output.trim().split('\n');
 
         for (const line of lines) {
-            if (!line.trim()) continue;
+            if (!line.trim()) {
+                continue;
+            }
             const parts = line.split('\t');
             if (parts.length >= 2) {
                 files.push({
@@ -142,7 +148,7 @@ export class GitService {
      */
     async isBinaryFile(commitish: string, filePath: string): Promise<boolean> {
         try {
-            const result = await this.git.raw(['show', '--text', `${commitish}:${filePath}`]);
+            await this.git.raw(['show', '--text', `${commitish}:${filePath}`]);
             return false;
         } catch {
             return true;
@@ -159,6 +165,13 @@ export class GitService {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * Get text file content from a specific ref for snapshot export and other ref-based workflows.
+     */
+    async getFileContentAtRef(ref: string, filePath: string): Promise<string | null> {
+        return this.getFileContent(ref, filePath);
     }
 
     /**
@@ -326,7 +339,7 @@ export class GitService {
                 `${this._repoPath}/${filePath}`
             ]);
             return result;
-        } catch (error) {
+        } catch (_error) {
             // Fallback - generate diff from content
             return await this.generateFallbackDiff(commitSha, filePath);
         }
@@ -336,7 +349,9 @@ export class GitService {
         try {
             const commitContent = await this.getFileContent(commitSha, filePath);
             const workingTreeContent = await this.getWorkingTreeContent(filePath);
-            if (commitContent === null && workingTreeContent === null) return '';
+            if (commitContent === null && workingTreeContent === null) {
+                return '';
+            }
 
             const crypto = await import('crypto');
             const hashContent = (content: string) =>
@@ -369,8 +384,12 @@ export class GitService {
                 if (o === n) {
                     diff += ` ${o}\n`;
                 } else {
-                    if (o) diff += `-${o}\n`;
-                    if (n) diff += `+${n}\n`;
+                    if (o) {
+                        diff += `-${o}\n`;
+                    }
+                    if (n) {
+                        diff += `+${n}\n`;
+                    }
                 }
             }
             return diff;
