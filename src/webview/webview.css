@@ -127,10 +127,12 @@ body {
     gap: 8px;
 }
 
+.global-accept-btn,
 .global-stage-btn,
 .global-revert-btn,
 .global-unstage-btn,
-.global-restore-btn {
+.global-restore-btn,
+.global-report-btn {
     padding: 6px 12px;
     font-size: 0.9em;
     font-weight: 600;
@@ -142,14 +144,17 @@ body {
     color: var(--vscode-button-foreground);
 }
 
+.global-accept-btn:hover,
 .global-stage-btn:hover,
 .global-revert-btn:hover,
 .global-unstage-btn:hover,
-.global-restore-btn:hover {
+.global-restore-btn:hover,
+.global-report-btn:hover {
     background-color: var(--vscode-button-hoverBackground);
 }
 
 /* File action buttons (stage, revert, restore) */
+.accept-btn,
 .stage-btn,
 .revert-btn,
 .restore-btn {
@@ -157,6 +162,7 @@ body {
     color: var(--vscode-button-foreground);
 }
 
+.accept-btn:hover,
 .stage-btn:hover,
 .revert-btn:hover,
 .restore-btn:hover {
@@ -327,4 +333,238 @@ body .d2h-icon {
 
 .sb-context-line {
     background-color: transparent;
+}
+.file-directory {
+    margin-left: 8px;
+    font-size: 0.85em;
+    color: var(--vscode-descriptionForeground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Search toolbar (stays visible while scrolling) */
+#toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    background-color: var(--vscode-editor-background);
+}
+
+#search {
+    flex: 1;
+    max-width: 600px;
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--vscode-input-foreground);
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 2px;
+    outline: none;
+}
+
+#search:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+#search::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+#search-count {
+    font-size: 0.85em;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Shown while an action runs; buttons are disabled meanwhile */
+#busy-banner {
+    position: sticky;
+    top: 44px;
+    z-index: 10;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border-left: 3px solid var(--vscode-progressBar-background, var(--vscode-focusBorder));
+    background-color: var(--vscode-editorWidget-background);
+    color: var(--vscode-editor-foreground);
+}
+
+.busy-title::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 8px;
+    border: 2px solid var(--vscode-descriptionForeground);
+    border-top-color: transparent;
+    border-radius: 50%;
+    vertical-align: -1px;
+    animation: gitgg-spin 0.8s linear infinite;
+}
+
+@keyframes gitgg-spin {
+    to { transform: rotate(360deg); }
+}
+
+body.busy button {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.section-toggle {
+    margin: 16px 0 8px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    color: var(--vscode-descriptionForeground);
+}
+
+.section-toggle:hover {
+    color: var(--vscode-editor-foreground);
+}
+
+.show-more-btn {
+    display: block;
+    margin: 8px auto 16px;
+    padding: 4px 12px;
+    font-size: 0.85em;
+}
+
+.empty-message {
+    padding: 16px;
+    text-align: center;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Busy banner details: step text and a progress bar */
+.busy-title {
+    font-weight: 600;
+}
+
+.busy-detail {
+    margin-top: 2px;
+    font-size: 0.9em;
+    color: var(--vscode-descriptionForeground);
+}
+
+.busy-progress {
+    height: 3px;
+    margin-top: 6px;
+    background-color: var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.3));
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.busy-progress > div {
+    height: 100%;
+    background-color: var(--vscode-progressBar-background, var(--vscode-focusBorder));
+    transition: width 0.3s ease;
+}
+
+/* Result banner: green for success (with Undo), red for errors (with Details) */
+#result-banner {
+    position: sticky;
+    top: 44px;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    background-color: var(--vscode-editorWidget-background);
+    color: var(--vscode-editor-foreground);
+    border-left: 3px solid;
+}
+
+#result-banner[hidden] {
+    display: none;
+}
+
+#result-banner.result-success {
+    border-left-color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+}
+
+#result-banner.result-error {
+    border-left-color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.result-success .result-icon {
+    color: var(--vscode-gitDecoration-addedResourceForeground, #73c991);
+    font-weight: bold;
+}
+
+.result-error .result-icon {
+    color: var(--vscode-errorForeground, #f14c4c);
+    font-weight: bold;
+}
+
+.result-text {
+    flex: 1;
+}
+
+.result-close {
+    padding: 0 6px;
+    font-size: 1.2em;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--vscode-descriptionForeground);
+    background: none;
+    border: none;
+}
+
+.result-close:hover {
+    color: var(--vscode-editor-foreground);
+}
+
+.result-details {
+    flex-basis: 100%;
+    max-height: 200px;
+    margin: 4px 0 0;
+    padding: 6px;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.85em;
+    background-color: var(--vscode-editor-background);
+}
+
+/* Single-file actions: spinner on the row, only that row is disabled */
+.row-busy .d2h-file-stats button {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.row-spinner {
+    margin-right: 8px;
+    font-size: 0.8em;
+    color: var(--vscode-descriptionForeground);
+    white-space: nowrap;
+}
+
+.row-spinner::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border: 2px solid var(--vscode-descriptionForeground);
+    border-top-color: transparent;
+    border-radius: 50%;
+    vertical-align: -1px;
+    animation: gitgg-spin 0.8s linear infinite;
+}
+
+/* Rows changed by the last action briefly light up (outline: the header background is !important) */
+.row-flash {
+    animation: gitgg-flash 1.8s ease-out;
+}
+
+@keyframes gitgg-flash {
+    0%, 35% { box-shadow: 0 0 0 2px var(--vscode-focusBorder, #007fd4); }
+    100% { box-shadow: 0 0 0 2px transparent; }
 }

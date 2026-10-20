@@ -11,6 +11,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.2] - 2026-10-20
+
+### Fixed
+- 🛡️ **Stage no longer overwrites your files silently**: "Stage" / "Stage All" used to replace the file with the compared branch's version (or delete it) before staging, with no way back. They now stage the file exactly as it is on disk, and bringing the branch version is an explicit action (see "Use `<branch>`" below).
+- 🛡️ **Snapshot export no longer deletes user folders**: the export only replaces a folder it created itself (marked with `.gitgg-snapshot`) and asks before touching any other existing folder.
+- ⌨️ **Typing `|` works again**: `Shift+\` no longer triggers a comparison inside the editor. The editor shortcut is now `Ctrl+Alt+\` (`Cmd+Alt+\` on macOS); `Shift+\` still works in the Explorer and Source Control views.
+- ✅ **Revert is consistent and safe**: in every view it puts the file back as it is in your current branch (HEAD), always asks for confirmation and can be undone with "Restore Changes" while VS Code is open. It only appears for files that actually differ from your branch.
+- 👀 **Stage / Stage All** only appear when there is something to stage, and the "Use all from `<branch>`" button now matches the size of the other global buttons.
+- 🎯 **Release Drift accuracy**: identical files are now reported as unchanged (the old hash comparison never matched), renamed files are detected, and root commits are supported.
+- 🧩 **Diffs render correctly**: diffs are generated in-process, so inline diffs are no longer empty or misaligned, and untracked files are compared with the other branch's version.
+- 🔒 **Webview robustness**: files containing `</script>`, `$&` or HTML in their names no longer break or corrupt the report.
+- 📁 **Correct repository detection**: works when the workspace is a subfolder of the repository and in multi-root workspaces.
+- 📂 **SCM group comparison**: right-clicking a Source Control group compares the files in that group instead of the active editor.
+- ✔️ **Commit SHA validation**: invalid SHAs are now rejected when typed manually.
+
+### Changed
+- 🎨 Diff editors show syntax highlighting and no temporary files are written to disk.
+- 🌗 Inline diffs follow the VS Code theme (light or dark).
+- 🌿 Branch pickers also list branches that only exist on `origin`; the current branch is marked.
+- 📝 The PR Comparison report is no longer written to the repository root on every run: a **Save Report** button in the panel saves it where you choose, with the current state of the comparison. It now uses the working tree of the promotion branch and reports files missing in the promotion branch.
+- 🔁 Actions in the single view refresh the comparison without reloading the page.
+- 🗂️ Commands are grouped under the **Gitgg** category in the Command Palette.
+
+### Added
+- 💬 **Clear feedback while working**: bulk actions show the current step ("Step 2 of 4: updating files..."), a progress bar and the elapsed time; single-file actions show a spinner on that row only. When done, a banner in the panel shows the result with an **Undo** button and the changed rows are highlighted, instead of pop-ups piling up. Errors appear in the panel with **Details**, in a notification with **Show Details**, and in the new **Gitgg** output channel.
+- ⏱️ **Comparison progress and cancel**: comparing many files shows "Reading 3,200 of 8,337 files..." with a percentage, and **Cancel** stops immediately.
+- 🗂️ **Actions in separate diff tabs**: diffs opened with "Compare in Separate Tabs" or "View full Diff" show Use compared version, Stage, Unstage, Revert and Restore Changes in the editor title bar, only when they apply. Changes made there are reflected in open panels (and vice versa).
+- 🚀 **Fast bulk actions**: "Use all", "Stage All", "Unstage All", "Revert All" and "Restore All" run as a few batched Git commands instead of one or more per file, with a progress notification and a "working" banner in the panel. Comparing thousands of files is also much faster. Requires Git 2.26 or later.
+- 🔍 **Search box** in the single view (`Ctrl+F`) to filter files by name or folder.
+- 📄 **Large lists stay responsive**: files are rendered 200 at a time ("Show more") and unchanged files are collapsed into their own section.
+- 💬 **Tooltips** on every button, badge and the search box.
+- 📥 **Use `<branch>` / Use all from `<branch>`**: new buttons in the single view that bring the compared version of a file into your working tree and stage it, with "Restore Changes" to undo (also unstages).
+- ⚙️ Settings: `gitgg.fetchBeforeCompare`, `gitgg.separateTabsMaxFiles`, `gitgg.diffLineLimit` and `gitgg.snapshotFolder`.
+- 🧪 Unit tests (including tests against a temporary Git repository) and a GitHub Actions CI workflow.
+
+---
+
 ## [0.2.0] - 2026-05-22
 
 ### Added

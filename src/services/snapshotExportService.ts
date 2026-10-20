@@ -1,9 +1,26 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { GitService } from './gitService';
+import type { GitService } from './gitService';
+
+export const SNAPSHOT_MARKER_FILE = '.gitgg-snapshot';
+
+/** Thrown when the snapshot folder already exists, was not created by Gitgg and the user did not allow overwriting it. */
+export class SnapshotCancelledError extends Error {
+    constructor(folder: string) {
+        super(`Snapshot export cancelled: '${folder}' already exists and was not created by Gitgg.`);
+        this.name = 'SnapshotCancelledError';
+    }
+}
 
 export interface SnapshotExportOptions {
     workspacePath: string;
+    /** Folder (relative to workspacePath) where the snapshot is written. Defaults to `snapshot`. */
+    folderName?: string;
+    /**
+     * Called when the snapshot folder exists but has no Gitgg marker file (it may hold user data).
+     * Return true to delete and overwrite it. When omitted, such a folder is never deleted.
+     */
+    confirmOverwrite?: (folder: string) => Promise<boolean>;
     sourceBranch: string;
     sourceRef: string;
     targetBranch: string;
@@ -104,17 +121,29 @@ export function buildSnapshotSummary(
 }
 
 export async function exportSnapshot(
-    gitService: GitService,
+    gitService: Pick<GitService, 'getFileContentAtRef'>,
     options: SnapshotExportOptions
 ): Promise<{ snapshotRoot: string; summaryPath: string }> {
-    const snapshotRoot = path.join(options.workspacePath, 'snapshot');
+    const snapshotRoot = path.join(options.workspacePath, options.folderName || 'snapshot');
     const sourceFolder = path.join(snapshotRoot, sanitizeBranchFolderName(options.sourceBranch));
     const targetFolder = path.join(snapshotRoot, sanitizeBranchFolderName(options.targetBranch));
     const generatedAt = options.generatedAt ?? new Date();
     const sortedChangedFiles = Array.from(new Set(options.changedFiles)).sort((left, right) => left.localeCompare(right));
 
-    await fs.promises.rm(snapshotRoot, { recursive: true, force: true });
+    if (fs.existsSync(snapshotRoot)) {
+        const createdByGitgg = fs.existsSync(path.join(snapshotRoot, SNAPSHOT_MARKER_FILE));
+        if (!createdByGitgg && !(options.confirmOverwrite && await options.confirmOverwrite(snapshotRoot))) {
+            throw new SnapshotCancelledError(snapshotRoot);
+        }
+        await fs.promises.rm(snapshotRoot, { recursive: true, force: true });
+    }
+
     await fs.promises.mkdir(sourceFolder, { recursive: true });
+    await fs.promises.writeFile(
+        path.join(snapshotRoot, SNAPSHOT_MARKER_FILE),
+        'Created by the Gitgg VS Code extension. This folder is replaced on every snapshot export.\n',
+        'utf8'
+    );
     await fs.promises.mkdir(targetFolder, { recursive: true });
 
     for (const filePath of sortedChangedFiles) {

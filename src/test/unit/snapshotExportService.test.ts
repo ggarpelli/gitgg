@@ -2,14 +2,16 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { GitService } from '../services/gitService';
+import { GitService } from '../../services/gitService';
 import {
     buildSnapshotSummary,
     detectSnapshotExtension,
     detectSnapshotFileType,
     exportSnapshot,
-    sanitizeBranchFolderName
-} from '../services/snapshotExportService';
+    sanitizeBranchFolderName,
+    SNAPSHOT_MARKER_FILE,
+    SnapshotCancelledError
+} from '../../services/snapshotExportService';
 
 suite('Snapshot Export Service Test Suite', () => {
     test('sanitizeBranchFolderName normalizes branch names', () => {
@@ -103,6 +105,39 @@ suite('Snapshot Export Service Test Suite', () => {
             assert.ok(summary.includes('Target Branch:\nM3'));
             assert.ok(summary.includes('Total Files:\n2'));
             assert.ok(summary.includes('Type: Flow Metadata'));
+        } finally {
+            await fs.promises.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
+
+    test('exportSnapshot never deletes a folder it did not create unless confirmed', async () => {
+        const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gitgg-snapshot-guard-'));
+        const userFile = path.join(tempRoot, 'snapshot', 'important.txt');
+        await fs.promises.mkdir(path.dirname(userFile), { recursive: true });
+        await fs.promises.writeFile(userFile, 'user data');
+
+        const gitService = { getFileContentAtRef: async () => 'content' };
+        const options = {
+            workspacePath: tempRoot,
+            sourceBranch: 'a',
+            sourceRef: 'a',
+            targetBranch: 'b',
+            targetRef: 'b',
+            changedFiles: ['file.txt']
+        };
+
+        try {
+            await assert.rejects(exportSnapshot(gitService, options), SnapshotCancelledError);
+            await assert.rejects(exportSnapshot(gitService, { ...options, confirmOverwrite: async () => false }), SnapshotCancelledError);
+            assert.strictEqual(fs.readFileSync(userFile, 'utf8'), 'user data');
+
+            // Once the user confirms, the folder is replaced and marked as Gitgg-owned...
+            await exportSnapshot(gitService, { ...options, confirmOverwrite: async () => true });
+            assert.strictEqual(fs.existsSync(userFile), false);
+            assert.strictEqual(fs.existsSync(path.join(tempRoot, 'snapshot', SNAPSHOT_MARKER_FILE)), true);
+
+            // ...so the next export replaces it without asking.
+            await exportSnapshot(gitService, options);
         } finally {
             await fs.promises.rm(tempRoot, { recursive: true, force: true });
         }

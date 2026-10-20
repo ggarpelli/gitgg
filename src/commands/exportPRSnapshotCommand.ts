@@ -1,105 +1,80 @@
 import * as vscode from 'vscode';
-import { GitService } from '../services/gitService';
-import { exportSnapshot } from '../services/snapshotExportService';
+import { exportSnapshot, SnapshotCancelledError } from '../services/snapshotExportService';
 import { pickBranchWithFavorites } from '../ui/branchPicker';
-
-function getRepoPath(): string | undefined {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        return undefined;
-    }
-    return workspaceFolders[0].uri.fsPath;
-}
+import { resolveGitService } from '../ui/repo';
+import { getConfig } from '../config';
 
 export async function runExportPRSnapshotCommand(context: vscode.ExtensionContext): Promise<void> {
-    const repoPath = getRepoPath();
-    if (!repoPath) {
-        vscode.window.showErrorMessage('Could not determine Git workspace.');
+    const git = await resolveGitService();
+    if (!git) {
         return;
     }
 
+    const promotionBranch = await git.getCurrentBranch();
+    if (!promotionBranch) {
+        vscode.window.showErrorMessage('Gitgg: Could not determine the current branch. Please check out a branch first.');
+        return;
+    }
+
+    const otherBranches = (await git.getBranches()).filter(branch => branch !== promotionBranch);
+    if (otherBranches.length === 0) {
+        vscode.window.showErrorMessage('Gitgg: No other branches available for selection.');
+        return;
+    }
+
+    const targetBranch = await pickBranchWithFavorites(context, otherBranches, 'Select target branch to compare with the current branch');
+    if (!targetBranch) {
+        return;
+    }
+
+    const config = getConfig();
     try {
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: 'Exporting PR snapshot...',
-            cancellable: true
-        }, async (progress, _token) => {
-            progress.report({ increment: 0, message: 'Initializing...' });
-
-            const gitService = new GitService(repoPath);
-            const promotionBranch = await gitService.getCurrentBranch();
-            if (!promotionBranch) {
-                vscode.window.showErrorMessage('Could not determine current branch. Please check out a branch first.');
-                return;
+            title: 'Gitgg: Exporting PR snapshot...'
+        }, async progress => {
+            progress.report({ message: 'Getting changed files...' });
+            const target = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare);
+            if (target.warning) {
+                vscode.window.showWarningMessage(`Gitgg: ${target.warning}`);
             }
 
-            progress.report({ increment: 20, message: 'Getting available branches...' });
-
-            const branches = await gitService.getAllBranches();
-            if (branches.length === 0) {
-                vscode.window.showErrorMessage('No branches found in repository.');
-                return;
-            }
-
-            const otherBranches = branches.filter(branch => branch !== promotionBranch);
-            if (otherBranches.length === 0) {
-                vscode.window.showErrorMessage('No other branches available for selection.');
-                return;
-            }
-
-            progress.report({ increment: 40, message: 'Selecting target branch...' });
-
-            const targetBranch = await pickBranchWithFavorites(
-                context,
-                otherBranches,
-                'Select target branch to compare with the current branch'
-            );
-            if (!targetBranch) {
-                return;
-            }
-
-            const resolveRef = async (branch: string): Promise<string> => {
-                try {
-                    await gitService.getCommitSha('origin/' + branch);
-                    return 'origin/' + branch;
-                } catch {
-                    return branch;
-                }
-            };
-
-            progress.report({ increment: 70, message: 'Getting changed files between branches...' });
-
-            const targetRef = await resolveRef(targetBranch);
-            const changedFiles = await gitService.getChangedFilesBetweenRefs(targetRef, promotionBranch);
+            const changedFiles = await git.getChangedFilesBetweenRefs(target.ref, promotionBranch);
             if (changedFiles.length === 0) {
-                vscode.window.showInformationMessage('No files changed between the branches.');
+                vscode.window.showInformationMessage('Gitgg: No files changed between the branches.');
                 return;
             }
 
-            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            if (!workspaceFolder) {
-                vscode.window.showErrorMessage('Could not determine workspace folder for snapshot export.');
-                return;
-            }
-
-            progress.report({ increment: 90, message: 'Writing snapshot files...' });
-
-            const snapshotExport = await exportSnapshot(gitService, {
-                workspacePath: workspaceFolder.uri.fsPath,
+            progress.report({ message: `Writing ${changedFiles.length} files...` });
+            const result = await exportSnapshot(git, {
+                workspacePath: git.getRepoPath(),
+                folderName: config.snapshotFolder,
                 sourceBranch: promotionBranch,
                 sourceRef: promotionBranch,
                 targetBranch,
-                targetRef,
+                targetRef: target.ref,
                 changedFiles,
-                generatedAt: new Date()
+                generatedAt: new Date(),
+                confirmOverwrite: async folder => {
+                    const choice = await vscode.window.showWarningMessage(
+                        `The folder '${folder}' already exists and was not created by Gitgg. Delete it and replace it with the snapshot?`,
+                        { modal: true },
+                        'Delete and Replace'
+                    );
+                    return choice === 'Delete and Replace';
+                }
             });
 
-            progress.report({ increment: 100, message: 'Snapshot export complete!' });
-
-            vscode.window.showInformationMessage(`PR snapshot exported to: ${snapshotExport.snapshotRoot}`);
+            const choice = await vscode.window.showInformationMessage(`Gitgg: PR snapshot exported to ${result.snapshotRoot}`, 'Open Summary');
+            if (choice) {
+                await vscode.window.showTextDocument(vscode.Uri.file(result.summaryPath));
+            }
         });
     } catch (error) {
-        console.error('Error exporting PR snapshot:', error);
-        vscode.window.showErrorMessage('Failed to export PR snapshot: ' + (error instanceof Error ? error.message : String(error)));
+        if (error instanceof SnapshotCancelledError) {
+            vscode.window.showInformationMessage(`Gitgg: ${error.message} Change the "gitgg.snapshotFolder" setting to use another folder.`);
+            return;
+        }
+        throw error;
     }
 }

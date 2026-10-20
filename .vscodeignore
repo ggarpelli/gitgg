@@ -47,6 +47,7 @@ eslint.config.mjs
 *.log
 *.vsix
 *.map
+**/*.map
 tmp/**
 temp/**
 
@@ -58,3 +59,4 @@ vsc-extension-quickstart.md
 
 .DS_Store
 Thumbs.db
+.github/**

@@ -1,46 +1,136 @@
 {
     "name": "GuilhermeGarpelli",
-    "displayName": "Gitgg - Branch File Diff",
-    "description": "An extension for comparing files across different Git branches.",
-    "version": "0.2.1",
+    "displayName": "Gitgg – Compare Branches & Files (Salesforce Ready)",
+    "description": "Compare files and folders with any Git branch, bring changes over with one click, detect release drift from commits and validate PRs against environment branches. Built for Salesforce DX teams.",
+    "version": "0.2.2",
     "publisher": "ggarpelli",
     "icon": "icon.png",
+    "license": "SEE LICENSE IN LICENSE.txt",
     "repository": {
         "type": "git",
         "url": "https://github.com/ggarpelli/gitgg.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ggarpelli/gitgg/issues"
     },
     "engines": {
         "vscode": "^1.81.0"
     },
     "categories": [
+        "SCM Providers",
         "Other"
     ],
-    "activationEvents": [
-        "onCommand:gitgg.compareFile",
-        "onCommand:gitgg.releaseDrift",
-        "onCommand:gitgg.prComparison",
-        "onCommand:gitgg.exportPRSnapshot"
+    "keywords": [
+        "git",
+        "diff",
+        "compare",
+        "branch",
+        "drift",
+        "pull request",
+        "salesforce",
+        "sfdx",
+        "compare branches",
+        "branch diff",
+        "file compare",
+        "git compare",
+        "multi-file diff",
+        "salesforce dx",
+        "apex",
+        "lwc",
+        "metadata",
+        "release",
+        "deployment",
+        "devops",
+        "code review"
     ],
+    "galleryBanner": {
+        "color": "#1f6feb",
+        "theme": "dark"
+    },
+    "pricing": "Free",
+    "qna": "https://github.com/ggarpelli/gitgg/issues",
+    "activationEvents": [],
     "main": "./dist/extension.js",
     "contributes": {
         "commands": [
             {
                 "command": "gitgg.compareFile",
-                "title": "Gitgg: Compare with another branch..."
+                "title": "Compare with another branch...",
+                "category": "Gitgg"
             },
             {
                 "command": "gitgg.releaseDrift",
-                "title": "Gitgg: Release Drift Detection..."
+                "title": "Release Drift Detection...",
+                "category": "Gitgg"
             },
             {
                 "command": "gitgg.prComparison",
-                "title": "Gitgg: Compare PR Changes..."
+                "title": "Compare PR Changes...",
+                "category": "Gitgg"
             },
             {
                 "command": "gitgg.exportPRSnapshot",
-                "title": "Gitgg: Export PR Snapshot"
+                "title": "Export PR Snapshot",
+                "category": "Gitgg"
+            },
+            {
+                "command": "gitgg.diff.useBase",
+                "title": "Use Compared Version (and Stage)",
+                "category": "Gitgg",
+                "icon": "$(arrow-right)"
+            },
+            {
+                "command": "gitgg.diff.stage",
+                "title": "Stage File",
+                "category": "Gitgg",
+                "icon": "$(add)"
+            },
+            {
+                "command": "gitgg.diff.unstage",
+                "title": "Unstage File",
+                "category": "Gitgg",
+                "icon": "$(remove)"
+            },
+            {
+                "command": "gitgg.diff.revert",
+                "title": "Revert to Current Branch (HEAD)",
+                "category": "Gitgg",
+                "icon": "$(discard)"
+            },
+            {
+                "command": "gitgg.diff.restore",
+                "title": "Restore Changes",
+                "category": "Gitgg",
+                "icon": "$(history)"
             }
         ],
+        "configuration": {
+            "title": "Gitgg",
+            "properties": {
+                "gitgg.fetchBeforeCompare": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Fetch the selected branch from 'origin' before comparing, so the comparison uses the latest remote version."
+                },
+                "gitgg.separateTabsMaxFiles": {
+                    "type": "number",
+                    "default": 5,
+                    "minimum": 1,
+                    "description": "Up to this many selected files, Gitgg asks whether to open separate diff tabs or a single view. Above it, the single view is always used."
+                },
+                "gitgg.diffLineLimit": {
+                    "type": "number",
+                    "default": 100,
+                    "minimum": 10,
+                    "description": "Maximum number of diff lines rendered inline per file in the single view. Use \"View full Diff\" for the rest."
+                },
+                "gitgg.snapshotFolder": {
+                    "type": "string",
+                    "default": "snapshot",
+                    "description": "Folder (relative to the repository root) where 'Export PR Snapshot' writes its files. Consider adding it to .gitignore."
+                }
+            }
+        },
         "menus": {
             "explorer/context": [
                 {
@@ -76,13 +166,68 @@
                     "command": "gitgg.compareFile",
                     "group": "navigation"
                 }
+            ],
+            "editor/title": [
+                {
+                    "command": "gitgg.diff.useBase",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canUseBase",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "gitgg.diff.stage",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canStage",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "gitgg.diff.unstage",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canUnstage",
+                    "group": "navigation@3"
+                },
+                {
+                    "command": "gitgg.diff.revert",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canRevert",
+                    "group": "navigation@4"
+                },
+                {
+                    "command": "gitgg.diff.restore",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canRestore",
+                    "group": "navigation@5"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "gitgg.diff.useBase",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canUseBase"
+                },
+                {
+                    "command": "gitgg.diff.stage",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canStage"
+                },
+                {
+                    "command": "gitgg.diff.unstage",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canUnstage"
+                },
+                {
+                    "command": "gitgg.diff.revert",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canRevert"
+                },
+                {
+                    "command": "gitgg.diff.restore",
+                    "when": "gitgg.diff.isCompareDiff && gitgg.diff.canRestore"
+                }
             ]
         },
         "keybindings": [
             {
                 "command": "gitgg.compareFile",
-                "key": "shift+backslash",
+                "key": "ctrl+alt+backslash",
+                "mac": "cmd+alt+backslash",
                 "when": "editorTextFocus || explorerFocus || scmFocus"
+            },
+            {
+                "command": "gitgg.compareFile",
+                "key": "shift+backslash",
+                "when": "(explorerFocus || scmFocus) && !inputFocus"
             }
         ]
     },
@@ -90,25 +235,29 @@
         "vscode:prepublish": "npm run webpack",
         "webpack": "webpack --mode production",
         "webpack-dev": "webpack --mode development --watch",
-        "lint": "eslint src --ext .ts",
         "compile": "npm run webpack",
-        "test": "npm run compile && node ./out/test/runTest.js"
+        "compile-dev": "webpack --mode development",
+        "typecheck": "tsc -p ./ --noEmit",
+        "lint": "eslint src",
+        "pretest": "tsc -p ./",
+        "test": "mocha --ui tdd \"out/test/unit/**/*.test.js\""
     },
     "dependencies": {
+        "diff": "^8.0.4",
         "diff2html": "^3.4.50",
         "simple-git": "^3.19.1"
     },
     "devDependencies": {
-        "@types/glob": "^8.1.0",
         "@types/mocha": "^10.0.1",
         "@types/node": "16.x",
         "@types/vscode": "^1.81.0",
         "@types/webpack-env": "^1.18.4",
         "@typescript-eslint/eslint-plugin": "^8.59.1",
         "@typescript-eslint/parser": "^8.59.1",
-        "@vscode/test-electron": "^2.3.2",
         "copy-webpack-plugin": "^13.0.1",
         "css-loader": "^7.1.4",
+        "eslint": "^9.39.0",
+        "mocha": "^10.8.2",
         "style-loader": "^4.0.0",
         "ts-loader": "^9.5.1",
         "typescript": "^5.1.3",

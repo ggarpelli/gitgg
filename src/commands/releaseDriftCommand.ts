@@ -1,14 +1,9 @@
 import * as vscode from 'vscode';
 import { GitService } from '../services/gitService';
-import { DriftResult } from '../services/gitService';
-import { DriftView } from '../views/driftView';
-import simpleGit, { SimpleGit } from 'simple-git';
 import { pickBranchWithFavorites } from '../ui/branchPicker';
-
-interface CommitItem extends vscode.QuickPickItem {
-    sha: string;
-    buttons?: vscode.QuickInputButton[];
-}
+import { resolveGitService } from '../ui/repo';
+import { DiffPanel } from '../views/diffPanel';
+import { compareWithProgress } from '../ui/feedback';
 
 const FAVORITE_COMMITS_KEY = 'favoriteCommits';
 const StarIcon = new vscode.ThemeIcon('star-full');
@@ -19,314 +14,191 @@ interface FavoriteCommit {
     alias: string;
 }
 
+interface CommitItem extends vscode.QuickPickItem {
+    sha: string;
+}
+
 export async function runReleaseDriftCommand(context: vscode.ExtensionContext, commitSha?: string): Promise<void> {
-    const repoPath = getRepoPath();
-    if (!repoPath) {
-        vscode.window.showErrorMessage('Could not determine Git workspace.');
+    const git = await resolveGitService();
+    if (!git) {
         return;
     }
 
-    const gitService = new GitService(repoPath);
-
-    // If no SHA provided, show branch picker then commit picker
-    if (!commitSha) {
-        const selection = await showBranchPicker(context, gitService, repoPath);
-        if (!selection) return;
-
-        // If user entered SHA directly, use it
-        if (selection.sha) {
-            commitSha = selection.sha;
-        } else if (selection.branch) {
-            const selectedSha = await showCommitPicker(context, repoPath, selection.branch);
-            if (!selectedSha) return;
-            commitSha = selectedSha;
-        }
-    }
-
-    if (!commitSha) {
-        vscode.window.showErrorMessage('No commit SHA provided.');
+    const sha = commitSha ? await git.getCommitSha(commitSha) : await pickCommit(context, git);
+    if (!sha) {
         return;
     }
 
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: 'GitGG: Detecting drift...',
+        title: 'Gitgg: Detecting drift...',
         cancellable: true
     }, async (progress, token) => {
-        progress.report({ increment: 0, message: 'Analyzing commit...' });
-
-        try {
-            const driftResult = await gitService.detectDrift(commitSha);
-
-            if (token.isCancellationRequested) return;
-
-            progress.report({ increment: 100, message: 'Rendering drift view...' });
-
-            await showDriftWebview(context, driftResult, gitService);
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Error detecting drift: ${error.message}`);
+        const [changedFiles, commitMessage] = await Promise.all([
+            git.getChangedFilesInCommit(sha),
+            git.getCommitMessage(sha)
+        ]);
+        if (changedFiles.length === 0) {
+            vscode.window.showInformationMessage(`Gitgg: Commit ${sha.substring(0, 7)} does not change any file.`);
+            return;
         }
+
+        const filePaths = changedFiles.map(file => file.path);
+        const comparison = await compareWithProgress(git, sha, filePaths, progress, token);
+        if (token.isCancellationRequested) {
+            return;
+        }
+
+        await DiffPanel.open(context, git, {
+            viewType: 'gitgg-drift-view',
+            title: `Drift: ${sha.substring(0, 7)} ${commitMessage} → Working Tree`,
+            baseRef: sha,
+            baseLabel: sha.substring(0, 7),
+            localLabel: 'Working Tree',
+            filePaths,
+            initialComparison: comparison
+        });
     });
 }
 
-async function showBranchPicker(context: vscode.ExtensionContext, gitService: GitService, repoPath: string): Promise<{ branch?: string; sha?: string } | undefined> {
-    const branches = await gitService.getAllBranches();
-    const currentBranch = await gitService.getCurrentBranch();
-
-    const favoriteCommits = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
-    const modeOptions = [
+async function pickCommit(context: vscode.ExtensionContext, git: GitService): Promise<string | undefined> {
+    const mode = await vscode.window.showQuickPick([
         { label: '$(git-branch) Select branch', value: 'branch' },
         { label: '$(git-commit) Enter SHA manually...', value: 'sha' },
         { label: '$(folder-library) Favorite Hashes', value: 'favorites' }
-    ];
+    ], { placeHolder: 'Select a branch, paste a SHA, or open favorite hashes' });
 
-    const pickMode = await vscode.window.showQuickPick(modeOptions, {
-        placeHolder: 'Select a branch, paste a SHA, or open favorite hashes'
-    });
-
-    if (!pickMode) return undefined;
-
-    // If manual option selected, ask for SHA
-    if (pickMode.value === 'sha') {
-        const shaInput = await vscode.window.showInputBox({
-            prompt: 'Enter commit SHA (full or short hash)',
-            placeHolder: 'e.g., abc1234 or abc1234567890abcdef',
-            validateInput: async (value) => {
-                if (!value || value.trim().length < 4) {
-                    return 'Please enter a valid commit SHA (at least 4 characters)';
-                }
-                try {
-                    const git = simpleGit({ baseDir: repoPath });
-                    await git.raw(['rev-parse', '--verify', value.trim()]);
-                    return null;
-                } catch {
-                    return 'Invalid commit SHA - could not verify';
-                }
-            }
-        });
-
-        if (!shaInput) return undefined;
-
-        // Get full SHA if short hash was provided
-        try {
-            const git = simpleGit({ baseDir: repoPath });
-            const fullSha = await git.raw(['rev-parse', shaInput.trim()]);
-            return { sha: fullSha.trim() };
-        } catch {
-            return { sha: shaInput.trim() };
-        }
+    if (!mode) {
+        return undefined;
     }
-
-    if (pickMode.value === 'favorites') {
-        if (favoriteCommits.length === 0) {
-            vscode.window.showInformationMessage('No favorite hashes saved yet.');
+    if (mode.value === 'sha') {
+        return promptForSha(context, git);
+    }
+    if (mode.value === 'favorites') {
+        const favorites = getFavorites(context);
+        if (favorites.length === 0) {
+            vscode.window.showInformationMessage('Gitgg: No favorite hashes saved yet.');
             return undefined;
         }
-
-        const selectedFavorite = await vscode.window.showQuickPick(
-            favoriteCommits.map(f => ({
-                label: `$(star-full) ${f.alias}`,
-                description: f.sha.substring(0, 7),
-                detail: f.sha,
-                sha: f.sha
-            })),
-            { placeHolder: 'Select a favorite hash' }
-        );
-
-        if (!selectedFavorite) return undefined;
-        return { sha: selectedFavorite.sha };
+        const selected = await vscode.window.showQuickPick(favorites.map(favoriteItem), { placeHolder: 'Select a favorite hash' });
+        return selected?.sha;
     }
 
-    const decoratedBranches = branches.map(branch =>
-        branch === currentBranch ? `${branch} (current)` : branch
-    );
-
-    const selectedBranch = await pickBranchWithFavorites(
-        context,
-        decoratedBranches,
-        'Select a branch (Favorites ⭐️ are listed first)'
-    );
-
-    if (!selectedBranch) return undefined;
-
-    return { branch: selectedBranch.replace(/\s\(current\)$/, '') };
+    const currentBranch = await git.getCurrentBranch();
+    const branch = await pickBranchWithFavorites(context, await git.getBranches(), 'Select a branch (Favorites ⭐️ are listed first)', currentBranch);
+    if (!branch) {
+        return undefined;
+    }
+    const { ref } = await git.resolveBranchRef(branch, false);
+    const branchRef = (await git.refExists(`refs/heads/${branch}`)) ? branch : ref;
+    return pickCommitFromBranch(context, git, branchRef);
 }
 
-async function showCommitPicker(context: vscode.ExtensionContext, repoPath: string, branch?: string): Promise<string | undefined> {
-    // Get recent commits using git log, filtered by branch if specified
-    const git = simpleGit({ baseDir: repoPath });
-    const args = ['log', '--format=%H|%s', '-n', '50'];
-    if (branch) {
-        args.push(branch);
-    }
-    const result = await git.raw(args);
+async function pickCommitFromBranch(context: vscode.ExtensionContext, git: GitService, branchRef: string): Promise<string | undefined> {
+    const commits = await git.getRecentCommits(branchRef, 50);
+    const manualOption: CommitItem = { label: '$(git-commit) Enter SHA manually...', description: 'Paste or type a commit hash', sha: '' };
 
-
-    const favorites = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
-    const favoriteItems: CommitItem[] = favorites.map(f => ({
-        label: `$(star-full) ${f.alias}`,
-        description: f.sha.substring(0, 7),
-        detail: f.sha,
-        sha: f.sha,
-        buttons: [{ iconPath: StarIcon, tooltip: "Remove from favorites" }]
-    }));
-
-    const commits: CommitItem[] = result.trim().split('\n')
-        .filter((line: string) => line.includes('|'))
-        .map((line: string) => {
-            const parts = line.split('|');
-            const sha = parts[0]?.trim() || '';
-            const message = parts.slice(1).join('|').trim();
-            return {
-                label: message.substring(0, 70) + (message.length > 70 ? '...' : ''),
-                description: sha.substring(0, 7),
-                sha,
+    const buildItems = (): CommitItem[] => {
+        const favorites = getFavorites(context);
+        const commitItems = commits
+            .filter(commit => !favorites.some(favorite => favorite.sha === commit.sha))
+            .map<CommitItem>(commit => ({
+                label: commit.subject.length > 70 ? commit.subject.substring(0, 70) + '...' : commit.subject,
+                description: commit.sha.substring(0, 7),
+                sha: commit.sha,
                 buttons: [{ iconPath: StarEmptyIcon, tooltip: 'Add to favorites' }]
-            };
-        });
-
-    // Add "Enter SHA manually" option at the top
-    const manualOption: CommitItem = {
-        label: '$(git-commit) Enter SHA manually...',
-        description: 'Paste or type a commit hash',
-        sha: ''
+            }));
+        return [manualOption, ...favorites.map(favoriteItem), ...commitItems];
     };
-
-    const options = [manualOption, ...favoriteItems, ...commits.filter(c => !favorites.some(f => f.sha === c.sha))];
 
     const pick = vscode.window.createQuickPick<CommitItem>();
-    pick.items = options;
-    pick.placeholder = 'Select a commit to compare against current branch';
+    pick.items = buildItems();
+    pick.placeholder = `Select a commit from ${branchRef} to compare with the working tree`;
 
-    const selected = await new Promise<CommitItem | undefined>((resolve) => {
-        pick.onDidAccept(() => { resolve(pick.selectedItems[0]); pick.hide(); });
-        pick.onDidTriggerItemButton(async ({ item }) => {
-            let current = context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
-            const existing = current.find(f => f.sha === item.sha);
-            if (existing) {
-                current = current.filter(f => f.sha !== item.sha);
-            } else {
-                const alias = await vscode.window.showInputBox({ prompt: "Favorite name (alias)", value: item.label.replace(/^\$\(star-full\)\s*/, '') });
-                if (!alias) return;
-                current.push({ sha: item.sha, alias: alias.trim() || item.sha.substring(0, 7) });
-            }
-            await context.globalState.update(FAVORITE_COMMITS_KEY, current);
-            pick.items = [manualOption, ...current.map(f => ({ label: `$(star-full) ${f.alias}`, description: f.sha.substring(0,7), detail: f.sha, sha: f.sha, buttons: [{ iconPath: StarIcon, tooltip: "Remove from favorites" }] })), ...commits.filter(c => !current.some(f => f.sha === c.sha)).map(c => ({...c, buttons:[{ iconPath: StarEmptyIcon, tooltip:"Add to favorites" }]}))];
+    let askingAlias = false;
+    const selected = await new Promise<CommitItem | undefined>(resolve => {
+        pick.onDidAccept(() => {
+            resolve(pick.selectedItems[0]);
+            pick.hide();
         });
-        pick.onDidHide(() => { resolve(undefined); pick.dispose(); });
+        pick.onDidTriggerItemButton(async ({ item }) => {
+            if (getFavorites(context).some(favorite => favorite.sha === item.sha)) {
+                await removeFavorite(context, item.sha);
+            } else {
+                // The alias input box temporarily replaces (hides) the quick pick; reopen it afterwards.
+                askingAlias = true;
+                await addFavorite(context, item.sha, item.label);
+                askingAlias = false;
+                pick.show();
+            }
+            pick.items = buildItems();
+        });
+        pick.onDidHide(() => {
+            if (!askingAlias) {
+                resolve(undefined);
+            }
+        });
         pick.show();
     });
+    pick.dispose();
 
-    if (!selected) return undefined;
+    if (!selected) {
+        return undefined;
+    }
+    return selected.sha || promptForSha(context, git);
+}
 
-    if (selected.sha && selected.sha !== "") return selected.sha;
-
-    // If manual option selected, ask for SHA
-    if (selected.sha === '') {
-        const shaInput = await vscode.window.showInputBox({
-            prompt: 'Enter commit SHA (full or short hash)',
-            placeHolder: 'e.g., abc1234 or abc1234567890abcdef',
-            validateInput: async (value) => {
-                if (!value || value.trim().length < 4) {
-                    return 'Please enter a valid commit SHA (at least 4 characters)';
-                }
-                // Validate that the SHA exists
-                try {
-                    await git.raw(['rev-parse', '--verify', value.trim()]);
-                    return null;
-                } catch {
-                    return 'Invalid commit SHA - could not verify';
-                }
+async function promptForSha(context: vscode.ExtensionContext, git: GitService): Promise<string | undefined> {
+    const input = await vscode.window.showInputBox({
+        prompt: 'Enter commit SHA (full or short hash)',
+        placeHolder: 'e.g., abc1234 or abc1234567890abcdef',
+        validateInput: async value => {
+            if (!value || value.trim().length < 4) {
+                return 'Please enter a valid commit SHA (at least 4 characters)';
             }
-        });
-
-        if (!shaInput) return undefined;
-
-        // Get full SHA if short hash was provided
-        try {
-            const fullSha = await git.raw(['rev-parse', shaInput.trim()]);
-            return fullSha.trim();
-        } catch {
-            return shaInput.trim();
+            return (await git.refExists(value.trim())) ? null : 'Invalid commit SHA - could not verify';
         }
+    });
+    if (!input) {
+        return undefined;
     }
 
-    return selected.sha;
-}
-
-async function showDriftWebview(
-    context: vscode.ExtensionContext,
-    driftResult: DriftResult,
-    gitService: GitService
-): Promise<void> {
-    const driftView = new DriftView();
-    context.subscriptions.push(driftView);
-    await driftView.show(context, driftResult, gitService);
-}
-
-async function stageFromDrift(
-    gitService: GitService,
-    driftResult: DriftResult,
-    filePath: string
-): Promise<void> {
-    // Get content from commit
-    const content = await gitService.getFileContent(driftResult.commitSha, filePath);
-
-    if (content === null) {
-        // File doesn't exist in commit - delete from working tree
-        await gitService.deleteFile(filePath);
-    } else {
-        // Write content to working tree first
-        await gitService.writeToWorkingTree(filePath, content);
+    const sha = await git.getCommitSha(input.trim());
+    if (!getFavorites(context).some(favorite => favorite.sha === sha)) {
+        // Non-blocking offer, so the drift analysis starts right away.
+        void vscode.window.showInformationMessage(`Gitgg: Save ${sha.substring(0, 7)} as a favorite hash?`, 'Save as Favorite')
+            .then(choice => choice ? addFavorite(context, sha, sha.substring(0, 7)) : undefined);
     }
-
-    // Now stage it
-    await gitService.stageFile(filePath);
+    return sha;
 }
 
-async function refreshDriftView(
-    panel: vscode.WebviewPanel,
-    gitService: GitService,
-    driftResult: DriftResult
-): Promise<void> {
-    const newResult = await gitService.detectDrift(driftResult.commitSha);
-    panel.webview.postMessage({ command: 'update', data: newResult });
+function getFavorites(context: vscode.ExtensionContext): FavoriteCommit[] {
+    return context.globalState.get<FavoriteCommit[]>(FAVORITE_COMMITS_KEY, []);
 }
 
-function getDriftWebviewContent(
-    context: vscode.ExtensionContext,
-    webview: vscode.Webview,
-    driftResult: DriftResult,
-    currentBranch: string
-): string {
-    const nonce = require('crypto').randomBytes(16).toString('base64');
-
-    const htmlPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview', 'webview.html');
-    const cssPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview', 'webview.css');
-    const jsPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview', 'main.js');
-
-    const cssUri = webview.asWebviewUri(cssPath);
-    const jsUri = webview.asWebviewUri(jsPath);
-
-    let htmlContent = require('fs').readFileSync(htmlPath.fsPath, 'utf8');
-
-    const webviewData = {
-        driftResult,
-        currentBranch
+function favoriteItem(favorite: FavoriteCommit): CommitItem {
+    return {
+        label: `$(star-full) ${favorite.alias}`,
+        description: favorite.sha.substring(0, 7),
+        detail: favorite.sha,
+        sha: favorite.sha,
+        buttons: [{ iconPath: StarIcon, tooltip: 'Remove from favorites' }]
     };
-
-    htmlContent = htmlContent.replace(/_WEBVIEW_CSS_URI_/g, cssUri.toString());
-    htmlContent = htmlContent.replace(/_WEBVIEW_JS_URI_/g, jsUri.toString());
-    htmlContent = htmlContent.replace('_VSCODE_WEBVIEW_DATA_', JSON.stringify(webviewData));
-    htmlContent = htmlContent.replace(/_CSP_SOURCE_/g, webview.cspSource);
-    htmlContent = htmlContent.replace(/_NONCE_/g, nonce);
-
-    return htmlContent;
 }
 
-function getRepoPath(): string | undefined {
-    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-        return vscode.workspace.workspaceFolders[0].uri.fsPath;
+async function addFavorite(context: vscode.ExtensionContext, sha: string, suggestedAlias: string): Promise<void> {
+    const alias = await vscode.window.showInputBox({
+        prompt: 'Favorite name (alias)',
+        value: suggestedAlias.replace(/^\$\(star-full\)\s*/, '')
+    });
+    if (alias === undefined) {
+        return;
     }
-    return undefined;
+    const favorites = getFavorites(context).filter(favorite => favorite.sha !== sha);
+    favorites.push({ sha, alias: alias.trim() || sha.substring(0, 7) });
+    await context.globalState.update(FAVORITE_COMMITS_KEY, favorites);
+}
+
+async function removeFavorite(context: vscode.ExtensionContext, sha: string): Promise<void> {
+    await context.globalState.update(FAVORITE_COMMITS_KEY, getFavorites(context).filter(favorite => favorite.sha !== sha));
 }
