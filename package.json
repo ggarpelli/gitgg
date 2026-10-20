@@ -2,7 +2,7 @@
     "name": "GuilhermeGarpelli",
     "displayName": "Gitgg – Compare Branches & Files (Salesforce Ready)",
     "description": "Compare files and folders with any Git branch, bring changes over with one click, detect release drift from commits and validate PRs against environment branches. Built for Salesforce DX teams.",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "publisher": "ggarpelli",
     "icon": "icon.png",
     "license": "SEE LICENSE IN LICENSE.txt",

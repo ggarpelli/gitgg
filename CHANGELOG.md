@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.2] - 2026-10-20
+## [0.2.3] - 2026-10-20
 
 ### Fixed
 - 🛡️ **Stage no longer overwrites your files silently**: "Stage" / "Stage All" used to replace the file with the compared branch's version (or delete it) before staging, with no way back. They now stage the file exactly as it is on disk, and bringing the branch version is an explicit action (see "Use `<branch>`" below).
