@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.4] - 2026-10-21
+
+### Added
+- 🌿 **Compare Current Branch**: Compare the checked-out branch with another branch, including staged and unstaged working-tree changes.
+- ☁️ **Salesforce-aware grouping**: Salesforce metadata is categorized by type, related component files are grouped, and object metadata follows the Salesforce source-format folder hierarchy. Non-Salesforce repositories remain supported.
+- 🔎 **Change navigation**: Filter by change status, sort large categories by name or change size, and see line totals and file status before expanding grouped components.
+
+### Changed
+- 📂 **Large comparison lists**: Categories remain easy to collapse while searching; small groups expand automatically, and large lists load progressively with accurate visible counts.
+- 🔢 **Consistent file counts and progress**: File totals appear throughout comparison flows, including long-running snapshot exports.
+
+### Fixed
+- ⏹️ **Snapshot export cancellation**: Export now reports progress, supports cancellation, reads files in batches, safely replaces its own prior snapshot, and asks before overwriting other folders.
+- 🆕 **Grouped file status**: Added and deleted states are visible on collapsed groups, before opening their file lists.
+
+---
+
 ## [0.2.3] - 2026-10-20
 
 ### Fixed
@@ -45,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 📥 **Use `<branch>` / Use all from `<branch>`**: new buttons in the single view that bring the compared version of a file into your working tree and stage it, with "Restore Changes" to undo (also unstages).
 - ⚙️ Settings: `gitgg.fetchBeforeCompare`, `gitgg.separateTabsMaxFiles`, `gitgg.diffLineLimit` and `gitgg.snapshotFolder`.
 - 🧪 Unit tests (including tests against a temporary Git repository) and a GitHub Actions CI workflow.
+
+---
+
+## [0.2.2] - 2026-10-20
+
+### Changed
+- 🔎 **Marketplace discovery**: Added Git and Salesforce search keywords and moved the extension into the **SCM Providers** category.
+
+---
+
+## [0.2.1] - 2026-05-28
+
+### Added
+- 📦 **PR Snapshot Export**: Export both branches' committed versions of changed files into a separate folder, preserving repository paths and generating a Markdown summary.
 
 ---
 
@@ -90,46 +121,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.4] - 2026-05-15
+## [0.1.4] - 2026-05-18
 
 ### Added
 - 🔄 **Dynamic Global Action Buttons**: Smart button display that adapts to your Git state - Stage All, Unstage All, Revert All, and Restore All Changes
 - 💾 **File Revert with Backup**: Revert individual or all files with automatic backup - restore them anytime before closing the panel
 - 🎨 **Consistent Button Styling**: All action buttons now share the same visual style for a cohesive experience
 - ⌨️ **Keyboard Shortcut**: `Shift + \` shortcut now works across Editor, Explorer, and Source Control contexts
+- 🔒 **Webview Security**: A per-request nonce is generated in `getWebviewContent()`, replacing the insecure fixed nonce.
+- 📦 **Bundled diff2html**: `diff2html` is installed locally and bundled with webpack (`target: 'web'`), removing the external CDN dependency.
+- 🧹 **Temporary file cleanup**: Temporary files are tracked and removed automatically when diffs or panels close, or when the extension is deactivated.
+- 🎯 **Webview file actions**: Stage and Revert actions are available on each file in the multi-file report.
+- ✅ **GitHub Actions CI/CD**: Added an automated workflow for builds, linting, tests, and Marketplace publishing from version tags.
+- 🧪 **Test infrastructure**: Configured the `npm test` and `npm run compile` scripts.
 
 ### Changed
-- 📝 **Improved Revert Logic**: "Revert All" now only reverts non-staged files, preserving your staged changes
-- 🎯 **Button Ordering**: Global buttons now appear in logical order: Stage All → Unstage All → Revert All
-- 📋 **Enhanced README**: Updated documentation with new features and release notes
+- 📝 **Improved Revert Logic**: "Revert All" now only reverts non-staged files, preserving staged changes.
+- 🎯 **Button Ordering**: Global buttons now appear in logical order: Stage All → Unstage All → Revert All.
+- 📋 **Enhanced README**: Updated documentation with new features and release notes.
+- 📝 **Expanded ESLint rules**: Added `no-explicit-any`, `no-floating-promises`, and `no-unused-vars` to improve code quality.
+- 🏷️ **Improved types**: Replaced `any` with `unknown` in functions such as `extractUris` and in error handlers.
+- 📦 **Corrected dependencies**: Moved `simple-git` from `devDependencies` to `dependencies` because it is used at runtime.
+- 🎨 **Cleaner webview template**: Removed CDN links; the CSP now uses only `webview.cspSource` and a per-request nonce.
 
 ### Fixed
-- 🐛 **File Classification**: Fixed file state detection to properly track files after revert operations
-- 🐛 **Restore Functionality**: Fixed backup/restore system to properly recover reverted files
-
----
-
----
-
-## [0.1.4] - 2026-05-14
-
-### Added
-- 🔒 **Webview Security**: Nonce dinâmico gerado por requisição no `getWebviewContent()`, eliminando o nonce fixo inseguro
-- 📦 **diff2html Bundled**: O diff2html agora é instalado localmente e empacotado via webpack (`target: 'web'`), eliminando dependência de CDN externa
-- 🧹 **Limpeza de Arquivos Temporários**: Temp files agora são rastreados e removidos automaticamente ao fechar difffs, painéis ou ao desativar a extensão
-- 🎯 **Stage/Stage/Stage/Stage/Revert na Webview**: Botões "Stage" e "Revert" em cada arquivo no relatório multi-arquivo, permitindo staging/reversão direta da interface
-- 🔧 **QuickPick Dispose**: Corrigido vazamento de memória — QuickPick agora é descartado corretamente ao fechar
-- ✅ **GitHub Actions CI/CD**: Workflow automatizado com build, lint, testes e publicação automática no Marketplace via tags
-- 🧪 **Infraestrutura de Testes**: Scripts `npm test` e `npm run compile` configurados
-
-### Changed
-- 📝 **ESLint Expandido**: Novas regras (`no-explicit-any`, `no-floating-promises`, `no-unused-vars`) para maior qualidade de código
-- 🏷️ **Tipos Melhorados**: Uso de `unknown` em vez de `any` em funções como `extractUris` e handlers de erro
-- 📦 **Dependências Corrigidas**: `simple-git` movido de `devDependencies` para `dependencies` (era usado em runtime)
-- 🎨 **Webview Template Limpo**: Removidos links CDN, CSP agora usa apenas `webview.cspSource` e nonce dinâmico
-
-### Fixed
-- 🐛 **Typos Corrigidos**: `Preparing` (estava `Preparing`), `workspace` (estava `workspace` com 'c'), e diversos erros de sintaxe em `extension.ts`
+- 🐛 **File classification**: Fixed file state detection after revert operations.
+- 🐛 **Restore functionality**: Fixed the backup/restore system for reverted files.
+- 🔧 **QuickPick disposal**: Fixed a memory leak by disposing of the QuickPick when it closes.
+- 🐛 **Typos and syntax errors**: Corrected typos in status text and fixed several syntax errors in `extension.ts`.
 
 ---
 

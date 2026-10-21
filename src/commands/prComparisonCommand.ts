@@ -71,6 +71,7 @@ export async function runPRComparisonCommand(context: vscode.ExtensionContext): 
             baseRef: environment.ref,
             baseLabel: environmentBranch,
             localLabel: `${promotionBranch} (working tree)`,
+            contextNote: `The file list is the committed tree diff between ${promotionBranch} (HEAD) and ${destinationBranch}. For those files, Gitgg compares the current working-tree contents on ${promotionBranch} (including staged and unstaged edits) with ${environmentBranch}.`,
             filePaths: changedFiles,
             initialComparison: comparison,
             // Saved on demand from the panel ("Save Report"), built from the current state of the comparison.

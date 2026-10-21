@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { runCompareFileCommand } from './commands/compareFileCommand';
+import { runCompareBranchesCommand } from './commands/compareBranchesCommand';
 import { runReleaseDriftCommand } from './commands/releaseDriftCommand';
 import { runPRComparisonCommand } from './commands/prComparisonCommand';
 import { runExportPRSnapshotCommand } from './commands/exportPRSnapshotCommand';
@@ -12,6 +13,7 @@ export function activate(context: vscode.ExtensionContext) {
         registerRefContentProvider(),
         ...registerDiffTabActions(),
         vscode.commands.registerCommand('gitgg.compareFile', (...args: unknown[]) => withErrorHandling(() => runCompareFileCommand(context, args))),
+        vscode.commands.registerCommand('gitgg.compareBranches', () => withErrorHandling(() => runCompareBranchesCommand(context))),
         vscode.commands.registerCommand('gitgg.releaseDrift', (commitSha?: unknown) =>
             withErrorHandling(() => runReleaseDriftCommand(context, typeof commitSha === 'string' ? commitSha : undefined))),
         vscode.commands.registerCommand('gitgg.prComparison', () => withErrorHandling(() => runPRComparisonCommand(context))),

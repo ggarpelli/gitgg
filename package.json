@@ -2,7 +2,7 @@
     "name": "GuilhermeGarpelli",
     "displayName": "Gitgg – Compare Branches & Files (Salesforce Ready)",
     "description": "Compare files and folders with any Git branch, bring changes over with one click, detect release drift from commits and validate PRs against environment branches. Built for Salesforce DX teams.",
-    "version": "0.2.3",
+    "version": "0.2.4",
     "publisher": "ggarpelli",
     "icon": "icon.png",
     "license": "SEE LICENSE IN LICENSE.txt",
@@ -56,6 +56,11 @@
             {
                 "command": "gitgg.compareFile",
                 "title": "Compare with another branch...",
+                "category": "Gitgg"
+            },
+            {
+                "command": "gitgg.compareBranches",
+                "title": "Compare Current Branch with...",
                 "category": "Gitgg"
             },
             {
@@ -245,7 +250,7 @@
     "dependencies": {
         "diff": "^8.0.4",
         "diff2html": "^3.4.50",
-        "simple-git": "^3.19.1"
+        "simple-git": "^4.0.2"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.1",
@@ -254,10 +259,10 @@
         "@types/webpack-env": "^1.18.4",
         "@typescript-eslint/eslint-plugin": "^8.59.1",
         "@typescript-eslint/parser": "^8.59.1",
-        "copy-webpack-plugin": "^13.0.1",
+        "copy-webpack-plugin": "^14.0.0",
         "css-loader": "^7.1.4",
         "eslint": "^9.39.0",
-        "mocha": "^10.8.2",
+        "mocha": "^12.0.2",
         "style-loader": "^4.0.0",
         "ts-loader": "^9.5.1",
         "typescript": "^5.1.3",

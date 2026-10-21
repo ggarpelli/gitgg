@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { GitService } from './gitService';
+import { throwIfAborted } from '../utils/concurrency';
 
 export const SNAPSHOT_MARKER_FILE = '.gitgg-snapshot';
 
@@ -28,7 +29,11 @@ export interface SnapshotExportOptions {
     environmentBranch?: string;
     changedFiles: string[];
     generatedAt?: Date;
+    signal?: AbortSignal;
+    onProgress?: (done: number, total: number, phase: 'Reading files' | 'Writing files') => void;
 }
+
+type SnapshotGitService = Pick<GitService, 'getFileContentAtRef'> & Partial<Pick<GitService, 'readBlobs'>>;
 
 export interface SnapshotChangedFileSummary {
     path: string;
@@ -81,7 +86,18 @@ export function buildSnapshotSummary(
     entries: SnapshotChangedFileSummary[]
 ): string {
     const generatedAt = formatSnapshotTimestamp(options.generatedAt ?? new Date());
-    const lines: string[] = ['# Snapshot Summary', '', 'Source Branch:', options.sourceBranch, '', 'Target Branch:', options.targetBranch];
+    const lines: string[] = [
+        '# Snapshot Summary',
+        '',
+        'Source Branch:',
+        options.sourceBranch,
+        '',
+        'Target Branch:',
+        options.targetBranch,
+        '',
+        'Snapshot Contents:',
+        'Committed versions from the selected branch refs. Uncommitted working-tree changes are not included.'
+    ];
 
     if (options.environmentBranch) {
         lines.push('', 'Environment Branch:', options.environmentBranch);
@@ -121,65 +137,119 @@ export function buildSnapshotSummary(
 }
 
 export async function exportSnapshot(
-    gitService: Pick<GitService, 'getFileContentAtRef'>,
+    gitService: SnapshotGitService,
     options: SnapshotExportOptions
 ): Promise<{ snapshotRoot: string; summaryPath: string }> {
     const snapshotRoot = path.join(options.workspacePath, options.folderName || 'snapshot');
-    const sourceFolder = path.join(snapshotRoot, sanitizeBranchFolderName(options.sourceBranch));
-    const targetFolder = path.join(snapshotRoot, sanitizeBranchFolderName(options.targetBranch));
     const generatedAt = options.generatedAt ?? new Date();
     const sortedChangedFiles = Array.from(new Set(options.changedFiles)).sort((left, right) => left.localeCompare(right));
+    const tempSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const workingRoot = `${snapshotRoot}.gitgg-tmp-${tempSuffix}`;
+    const backupRoot = `${snapshotRoot}.gitgg-backup-${tempSuffix}`;
 
     if (fs.existsSync(snapshotRoot)) {
         const createdByGitgg = fs.existsSync(path.join(snapshotRoot, SNAPSHOT_MARKER_FILE));
         if (!createdByGitgg && !(options.confirmOverwrite && await options.confirmOverwrite(snapshotRoot))) {
             throw new SnapshotCancelledError(snapshotRoot);
         }
-        await fs.promises.rm(snapshotRoot, { recursive: true, force: true });
     }
 
-    await fs.promises.mkdir(sourceFolder, { recursive: true });
-    await fs.promises.writeFile(
-        path.join(snapshotRoot, SNAPSHOT_MARKER_FILE),
-        'Created by the Gitgg VS Code extension. This folder is replaced on every snapshot export.\n',
-        'utf8'
-    );
-    await fs.promises.mkdir(targetFolder, { recursive: true });
+    const sourceFolder = path.join(workingRoot, sanitizeBranchFolderName(options.sourceBranch));
+    const targetFolder = path.join(workingRoot, sanitizeBranchFolderName(options.targetBranch));
+    try {
+        throwIfAborted(options.signal);
+        await fs.promises.mkdir(sourceFolder, { recursive: true });
+        await fs.promises.writeFile(
+            path.join(workingRoot, SNAPSHOT_MARKER_FILE),
+            'Created by the Gitgg VS Code extension. This folder is replaced on every snapshot export.\n',
+            'utf8'
+        );
+        await fs.promises.mkdir(targetFolder, { recursive: true });
 
-    for (const filePath of sortedChangedFiles) {
-        const [sourceContent, targetContent] = await Promise.all([
-            gitService.getFileContentAtRef(options.sourceRef, filePath),
-            gitService.getFileContentAtRef(options.targetRef, filePath)
-        ]);
+        const batchSize = 200;
+        let written = 0;
+        options.onProgress?.(0, sortedChangedFiles.length, 'Reading files');
+        for (let offset = 0; offset < sortedChangedFiles.length; offset += batchSize) {
+            throwIfAborted(options.signal);
+            const batch = sortedChangedFiles.slice(offset, offset + batchSize);
+            const [sourceBlobs, targetBlobs] = await Promise.all([
+                readSnapshotBlobs(gitService, options.sourceRef, batch, options.signal),
+                readSnapshotBlobs(gitService, options.targetRef, batch, options.signal)
+            ]);
+            options.onProgress?.(offset + batch.length, sortedChangedFiles.length, 'Reading files');
 
-        if (sourceContent !== null) {
-            await writeSnapshotFile(sourceFolder, filePath, sourceContent);
+            for (const filePath of batch) {
+                throwIfAborted(options.signal);
+                const sourceContent = sourceBlobs.get(filePath);
+                const targetContent = targetBlobs.get(filePath);
+                if (sourceContent) {
+                    await writeSnapshotFile(sourceFolder, filePath, sourceContent);
+                }
+                if (targetContent) {
+                    await writeSnapshotFile(targetFolder, filePath, targetContent);
+                }
+                written++;
+                if (written % 50 === 0 || written === sortedChangedFiles.length) {
+                    options.onProgress?.(written, sortedChangedFiles.length, 'Writing files');
+                }
+            }
         }
 
-        if (targetContent !== null) {
-            await writeSnapshotFile(targetFolder, filePath, targetContent);
+        throwIfAborted(options.signal);
+        const summaryEntries = sortedChangedFiles.map(filePath => ({
+            path: filePath,
+            extension: detectSnapshotExtension(filePath),
+            type: detectSnapshotFileType(filePath)
+        }));
+
+        const summary = buildSnapshotSummary(
+            {
+                ...options,
+                generatedAt,
+                changedFiles: sortedChangedFiles
+            },
+            summaryEntries
+        );
+
+        await fs.promises.writeFile(path.join(workingRoot, 'SNAPSHOT_SUMMARY.md'), summary, 'utf8');
+        throwIfAborted(options.signal);
+
+        let movedExistingSnapshot = false;
+        try {
+            if (fs.existsSync(snapshotRoot)) {
+                await fs.promises.rename(snapshotRoot, backupRoot);
+                movedExistingSnapshot = true;
+            }
+            await fs.promises.rename(workingRoot, snapshotRoot);
+        } catch (error) {
+            if (movedExistingSnapshot && !fs.existsSync(snapshotRoot)) {
+                await fs.promises.rename(backupRoot, snapshotRoot).catch(() => undefined);
+            }
+            throw error;
         }
+        if (movedExistingSnapshot) {
+            await fs.promises.rm(backupRoot, { recursive: true, force: true }).catch(() => undefined);
+        }
+        return { snapshotRoot, summaryPath: path.join(snapshotRoot, 'SNAPSHOT_SUMMARY.md') };
+    } catch (error) {
+        await fs.promises.rm(workingRoot, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
     }
+}
 
-    const summaryEntries = sortedChangedFiles.map(filePath => ({
-        path: filePath,
-        extension: detectSnapshotExtension(filePath),
-        type: detectSnapshotFileType(filePath)
-    }));
-
-    const summary = buildSnapshotSummary(
-        {
-            ...options,
-            generatedAt,
-            changedFiles: sortedChangedFiles
-        },
-        summaryEntries
-    );
-
-    const summaryPath = path.join(snapshotRoot, 'SNAPSHOT_SUMMARY.md');
-    await fs.promises.writeFile(summaryPath, summary, 'utf8');
-
-    return { snapshotRoot, summaryPath };
+async function readSnapshotBlobs(
+    gitService: SnapshotGitService,
+    ref: string,
+    filePaths: string[],
+    signal?: AbortSignal
+): Promise<Map<string, Buffer | null>> {
+    throwIfAborted(signal);
+    if (gitService.readBlobs) {
+        return gitService.readBlobs(ref, filePaths, signal);
+    }
+    const contents = await Promise.all(filePaths.map(filePath => gitService.getFileContentAtRef(ref, filePath)));
+    throwIfAborted(signal);
+    return new Map(filePaths.map((filePath, index) => [filePath, contents[index] === null ? null : Buffer.from(contents[index]!, 'utf8')]));
 }
 
 function formatSnapshotTimestamp(date: Date): string {
@@ -192,9 +262,9 @@ function formatSnapshotTimestamp(date: Date): string {
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
-async function writeSnapshotFile(rootFolder: string, filePath: string, content: string): Promise<void> {
+async function writeSnapshotFile(rootFolder: string, filePath: string, content: Buffer): Promise<void> {
     const normalizedPath = filePath.replace(/[\\/]+/g, path.sep);
     const destinationPath = path.join(rootFolder, normalizedPath);
     await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
-    await fs.promises.writeFile(destinationPath, content, 'utf8');
+    await fs.promises.writeFile(destinationPath, content);
 }

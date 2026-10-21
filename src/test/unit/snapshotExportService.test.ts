@@ -142,4 +142,42 @@ suite('Snapshot Export Service Test Suite', () => {
             await fs.promises.rm(tempRoot, { recursive: true, force: true });
         }
     });
+
+    test('exportSnapshot cancellation preserves the previous snapshot and removes temporary files', async () => {
+        const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'gitgg-snapshot-cancel-'));
+        const snapshotRoot = path.join(tempRoot, 'snapshot');
+        const existingFile = path.join(snapshotRoot, 'previous-snapshot.txt');
+        await fs.promises.mkdir(snapshotRoot, { recursive: true });
+        await fs.promises.writeFile(path.join(snapshotRoot, SNAPSHOT_MARKER_FILE), 'Created by Gitgg.');
+        await fs.promises.writeFile(existingFile, 'keep this snapshot');
+
+        const controller = new AbortController();
+        const gitService = {
+            async getFileContentAtRef(): Promise<string | null> {
+                return 'content';
+            },
+            async readBlobs(_ref: string, filePaths: string[]): Promise<Map<string, Buffer | null>> {
+                controller.abort();
+                return new Map(filePaths.map(filePath => [filePath, Buffer.from('new content')]));
+            }
+        } as unknown as GitService;
+
+        try {
+            await assert.rejects(exportSnapshot(gitService, {
+                workspacePath: tempRoot,
+                sourceBranch: 'source',
+                sourceRef: 'source',
+                targetBranch: 'target',
+                targetRef: 'target',
+                changedFiles: ['file.txt'],
+                signal: controller.signal
+            }), (error: Error) => error.name === 'AbortError');
+
+            assert.strictEqual(await fs.promises.readFile(existingFile, 'utf8'), 'keep this snapshot');
+            const temporaryEntries = (await fs.promises.readdir(tempRoot)).filter(entry => entry.includes('.gitgg-tmp-'));
+            assert.deepStrictEqual(temporaryEntries, []);
+        } finally {
+            await fs.promises.rm(tempRoot, { recursive: true, force: true });
+        }
+    });
 });

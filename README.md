@@ -39,6 +39,9 @@ Right-click a file, several files, a folder or an SCM change group and choose **
 -   In a diff tab, the title bar shows the same actions as the single view (only when they apply; hover for a description): **Use compared version**, **Stage**, **Unstage**, **Revert** and **Restore Changes**.
 -   Your side is always the file on disk; when it has uncommitted changes it is labeled `(working tree)`.
 
+### 🌿 Compare current branch with another branch
+Run **Gitgg: Compare Current Branch with...** from the Command Palette, then select a branch such as PREPROD while checked out to UAT. Gitgg compares the selected branch with the current branch across the repository, including staged and unstaged changes on disk. The comparison opens in the single view, where files can be filtered by Added, Changed or Deleted.
+
 ### 📊 Single-view report
 A webview with a summary and the files grouped as Added, Changed, Deleted and Unchanged, with inline diffs that follow your VS Code theme.
 
@@ -47,6 +50,8 @@ A webview with a summary and the files grouped as Added, Changed, Deleted and Un
 -   **Revert**: shown only when the file differs from your current branch (local edits or after **Use `<branch>`**). After confirmation it puts the file back as it is in your branch (HEAD), dropping staged and unstaged changes. **Restore Changes** brings them back while VS Code is open (backups are shared between the single view and diff tabs).
 -   **View full Diff**: opens VS Code's diff editor with syntax highlighting.
 -   **Search** (`Ctrl+F`): filter thousands of files by name or folder, e.g. `AccountService` or `lwc/payment`.
+-   **Salesforce-aware grouping**: metadata is grouped by component type, related files are grouped together, and objects follow the Salesforce source-format folder hierarchy. Repositories without Salesforce structure continue to use regular file paths.
+-   **Status, sorting and line totals**: filter by Added, Changed or Deleted; sort by name, number of changed files or line changes. Grouped rows show status and added/removed line totals before they are expanded.
 -   Built for big comparisons: files are listed 200 at a time, unchanged files are collapsed, and bulk actions run as a few batched Git commands with a progress indicator. Hover any button to see what it does.
 -   **Always know what is happening**: long actions show the current step, a progress bar and the elapsed time; when they finish, a banner shows the result with an **Undo** button and the changed rows are highlighted. Errors show **Details** and are logged in the **Gitgg** output channel.
 
@@ -60,12 +65,18 @@ Before promoting code, validate it against the target environment:
 2.  Choose the **destination** branch (where the PR goes): defines which files are in the PR.
 3.  Choose the **environment** branch (source of truth, e.g. UAT): each file is compared with it.
 
+The file list is the committed tree diff between the promotion branch's `HEAD` and the destination branch. For those files, Gitgg compares the current promotion working tree (including staged and unstaged edits) with the environment branch. The panel repeats these inputs above the results.
+
 Files are classified as `IDENTICAL`, `DIFFERENT`, `MISSING_IN_ENVIRONMENT` or `MISSING_IN_PROMOTION`. A Markdown report grouped by Salesforce component type (Apex classes, triggers, flows, LWC, Aura, objects, fields, layouts, profiles...) can be saved with the **Save Report** button in the panel: you choose where, and it reflects the current state of the comparison (including files you changed with **Use `<environment>`**). Nothing is written to your repository unless you save it.
 
 ### 📦 Export PR Snapshot
 Writes both versions of every file changed between your branch and a target branch into a `snapshot/` folder (configurable), preserving the original folder structure, plus a `SNAPSHOT_SUMMARY.md`. Handy for code reviews and deployments.
 
+The snapshot uses committed versions at the selected branch refs; uncommitted working-tree changes are not included.
+
 The folder is replaced on each export, but Gitgg only deletes a folder it created itself (marked with a `.gitgg-snapshot` file). If a folder with that name already exists, you are asked first. Consider adding it to your `.gitignore`.
+
+The progress notification shows the export stage and file counts. You can cancel it; Gitgg removes the temporary export and keeps the previous snapshot intact.
 
 ## 🎬 See Gitgg in Action
 
@@ -108,6 +119,8 @@ All commands are also available in the Command Palette under the **Gitgg** categ
 -   You must be working inside a project with an initialized Git repository.
 
 ## 🛠️ Development
+
+Local development checks require Node.js 20.19+, 22.13+, or 24+. The CI workflow uses Node.js 22.
 
 ```bash
 npm install

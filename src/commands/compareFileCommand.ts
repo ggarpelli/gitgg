@@ -118,10 +118,14 @@ export async function runCompareFileCommand(context: vscode.ExtensionContext, ar
         const localLabel = await buildLocalLabel(git, currentBranch, relativePaths);
 
         if (mode === 'separate') {
-            for (const relativePath of relativePaths) {
+            for (const [index, relativePath] of relativePaths.entries()) {
                 if (token.isCancellationRequested) {
                     return;
                 }
+                progress.report({
+                    message: `Opening diff ${index + 1} of ${relativePaths.length} files...`,
+                    increment: 100 / relativePaths.length
+                });
                 await openRefDiff(git, baseRef, relativePath, targetBranch, localLabel);
             }
             return;

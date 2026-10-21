@@ -24,6 +24,8 @@ export interface DiffPanelOptions {
     baseRef: string;
     baseLabel: string;
     localLabel: string;
+    /** Extra context shown above the comparison (used to explain PR reference semantics). */
+    contextNote?: string;
     filePaths: string[];
     /** Comparison already computed by the command, to avoid doing it twice on open. */
     initialComparison?: FileComparison[];
@@ -42,6 +44,7 @@ interface WebviewPayload {
     unchangedFiles: WebviewFile[];
     targetBranch: string;
     localFileLabel: string;
+    contextNote?: string;
     /** Files with staged changes and files with unstaged (or untracked) changes. */
     status: { staged: string[]; unstaged: string[] };
     restorableFiles: string[];
@@ -398,6 +401,7 @@ export class DiffPanel {
             unchangedFiles: byKind('unchanged'),
             targetBranch: this.options.baseLabel,
             localFileLabel: this.options.localLabel,
+            contextNote: this.options.contextNote,
             status: { staged, unstaged },
             restorableFiles: this.restorablePaths(),
             lineLimit: getConfig().diffLineLimit,

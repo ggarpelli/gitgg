@@ -1,4 +1,4 @@
-import simpleGit, { SimpleGit, StatusResult } from 'simple-git';
+import { simpleGit, type SimpleGit, type StatusResult } from 'simple-git';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -309,7 +309,8 @@ export class GitService {
     }
 
     async getChangedFilesBetweenRefs(fromRef: string, toRef: string): Promise<string[]> {
-        const output = await this.git.raw(['diff', '--name-only', fromRef, toRef]);
+        // Keep both paths of a rename so callers can represent it as a deletion plus an addition.
+        const output = await this.git.raw(['diff', '--name-only', '--no-renames', fromRef, toRef]);
         return output.split('\n').map(line => line.trim()).filter(Boolean);
     }
 

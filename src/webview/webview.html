@@ -26,9 +26,16 @@
         <div class="summary-line" id="global-actions">
         </div>
     </div>
+    <div id="context-note" role="note" hidden></div>
 
     <div id="toolbar">
         <input id="search" type="search" placeholder="Search files by name or path (Ctrl+F)..." title="Filter the list by file name or folder, e.g. AccountService or lwc/payment. Esc clears it." autocomplete="off" spellcheck="false">
+        <select id="status-filter" title="Filter files by change status" aria-label="Filter by change status">
+            <option value="all">All changes</option>
+            <option value="added">Added</option>
+            <option value="changed">Changed</option>
+            <option value="deleted">Deleted</option>
+        </select>
         <span id="search-count"></span>
     </div>
     <div id="busy-banner" role="status" aria-live="polite" hidden></div>
