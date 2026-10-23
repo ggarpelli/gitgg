@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { FileComparison, GitService } from '../services/gitService';
-import { isAbortError } from '../utils/concurrency';
+import { isAbortError, isGitTimeoutError } from '../utils/concurrency';
 
 let outputChannel: vscode.OutputChannel | undefined;
 
@@ -11,6 +11,9 @@ export function getOutputChannel(): vscode.OutputChannel {
 }
 
 export function errorMessage(error: unknown): string {
+    if (isGitTimeoutError(error)) {
+        return 'Git stopped responding and the command was cancelled. Another Git operation (a fetch, a background "gc", or another editor) may be holding the repository. Try again in a moment.';
+    }
     return error instanceof Error ? error.message : String(error);
 }
 
@@ -38,6 +41,27 @@ function firstLine(text: string): string {
 type Progress = vscode.Progress<{ message?: string; increment?: number }>;
 
 /**
+ * Runs `body` with an AbortSignal tied to the progress notification's Cancel button, so every Git
+ * command started inside it is killed on cancel instead of finishing in the background.
+ * Cancelling rejects with an AbortError, which callers report as a silent stop.
+ */
+export async function runCancellable<T>(
+    token: vscode.CancellationToken,
+    body: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+    const controller = new AbortController();
+    if (token.isCancellationRequested) {
+        controller.abort();
+    }
+    const subscription = token.onCancellationRequested(() => controller.abort());
+    try {
+        return await body(controller.signal);
+    } finally {
+        subscription.dispose();
+    }
+}
+
+/**
  * Compares files while showing "Reading 3,200 of 8,337 files..." with a percentage bar,
  * and stops right away (killing Git) when the user presses Cancel.
  */
@@ -46,14 +70,12 @@ export function compareWithProgress(
     baseRef: string,
     filePaths: string[],
     progress: Progress,
-    token: vscode.CancellationToken
+    signal: AbortSignal
 ): Promise<FileComparison[]> {
-    const controller = new AbortController();
-    const subscription = token.onCancellationRequested(() => controller.abort());
     let reported = 0;
 
     return git.compareWithWorkingTree(baseRef, filePaths, {
-        signal: controller.signal,
+        signal,
         onProgress: (done, total, phase) => {
             // Two phases (reading, comparing), each worth half of the bar.
             const percent = total === 0 ? 100 : Math.floor((done / total) * 50) + (phase === 'Comparing' ? 50 : 0);
@@ -63,5 +85,5 @@ export function compareWithProgress(
             });
             reported = Math.max(reported, percent);
         }
-    }).finally(() => subscription.dispose());
+    });
 }

@@ -41,20 +41,41 @@ export class BackupStore {
      * Runs `action` (one batched Git operation) and records a backup for every file whose content or
      * staged state changed. Returns how many files changed.
      */
-    async apply(git: GitService, paths: string[], action: () => Promise<void>, report: (message: string) => void = () => undefined): Promise<number> {
+    async apply(
+        git: GitService,
+        paths: string[],
+        action: () => Promise<void>,
+        report: (message: string) => void = () => undefined,
+        reportFiles?: (phase: string, done: number, total: number) => void
+    ): Promise<number> {
         report(`saving a backup of ${paths.length} file${paths.length === 1 ? '' : 's'}...`);
         const stagedBefore = new Set((await git.getStatus()).staged);
-        const before = await git.readWorkingTreeBuffers(paths);
+        let read = 0;
+        reportFiles?.('Saving backup', 0, paths.length);
+        const before = await git.readWorkingTreeBuffers(paths, undefined, () => {
+            read++;
+            if (read % 100 === 0 || read === paths.length) {
+                reportFiles?.('Saving backup', read, paths.length);
+            }
+        });
 
         report('updating files...');
+        reportFiles?.('Updating files', 0, paths.length);
         await action();
+        reportFiles?.('Updating files', paths.length, paths.length);
 
         report('checking the result...');
-        const after = await git.readWorkingTreeBuffers(paths);
+        read = 0;
+        const after = await git.readWorkingTreeBuffers(paths, undefined, () => {
+            read++;
+            if (read % 100 === 0 || read === paths.length) {
+                reportFiles?.('Checking files', read, paths.length);
+            }
+        });
         const stagedAfter = new Set((await git.getStatus()).staged);
 
         let changed = 0;
-        for (const filePath of paths) {
+        for (const [index, filePath] of paths.entries()) {
             const beforeContent = before.get(filePath) ?? null;
             const afterContent = after.get(filePath) ?? null;
             if (buffersEqual(beforeContent, afterContent) && stagedBefore.has(filePath) === stagedAfter.has(filePath)) {
@@ -69,6 +90,9 @@ export class BackupStore {
                 wasStaged: previous ? previous.wasStaged : stagedBefore.has(filePath)
             });
             changed++;
+            if ((index + 1) % 100 === 0 || index + 1 === paths.length) {
+                reportFiles?.('Checking files', index + 1, paths.length);
+            }
         }
         return changed;
     }
@@ -87,9 +111,22 @@ export class BackupStore {
     }
 
     /** Puts content and staging state back as they were before the first action, then forgets the backups. */
-    async restore(git: GitService, entries: RestoreEntry[], report: (message: string) => void = () => undefined): Promise<void> {
+    async restore(
+        git: GitService,
+        entries: RestoreEntry[],
+        report: (message: string) => void = () => undefined,
+        reportFiles?: (phase: string, done: number, total: number) => void
+    ): Promise<void> {
         report('writing files...');
-        await mapWithConcurrency(entries, 32, entry => git.writeWorkingTreeBuffer(entry.filePath, entry.backup.content));
+        let written = 0;
+        reportFiles?.('Restoring files', 0, entries.length);
+        await mapWithConcurrency(entries, 32, async entry => {
+            await git.writeWorkingTreeBuffer(entry.filePath, entry.backup.content);
+            written++;
+            if (written % 100 === 0 || written === entries.length) {
+                reportFiles?.('Restoring files', written, entries.length);
+            }
+        });
         report('updating the staging area...');
         await git.stageFiles(entries.filter(entry => entry.backup.wasStaged).map(entry => entry.filePath));
         // Fails harmlessly in a repository without commits.

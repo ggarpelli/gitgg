@@ -40,20 +40,22 @@ Right-click a file, several files, a folder or an SCM change group and choose **
 -   Your side is always the file on disk; when it has uncommitted changes it is labeled `(working tree)`.
 
 ### 🌿 Compare current branch with another branch
-Run **Gitgg: Compare Current Branch with...** from the Command Palette, then select a branch such as PREPROD while checked out to UAT. Gitgg compares the selected branch with the current branch across the repository, including staged and unstaged changes on disk. The comparison opens in the single view, where files can be filtered by Added, Changed or Deleted.
+Run **Gitgg: Compare Current Branch with...** from the Command Palette, then select a branch such as PREPROD while checked out to UAT. Gitgg compares the selected branch with the current branch across the repository, including staged and unstaged changes on disk. The comparison opens in the single view, where files can be filtered by New, Changed or Deleted.
 
 ### 📊 Single-view report
-A webview with a summary and the files grouped as Added, Changed, Deleted and Unchanged, with inline diffs that follow your VS Code theme.
+A webview with a summary and the files grouped as New, Changed, Deleted and Unchanged, with inline diffs that follow your VS Code theme.
 
 -   **Use `<branch>`** / **Use all from `<branch>`**: replaces your file with the version from the compared branch (or deletes it, if it does not exist there) and stages it. **Restore Changes** undoes it while VS Code is open (backups are shared between the single view and diff tabs).
 -   **Stage / Unstage**: shown only when the file has unstaged (or staged) changes; stages the file exactly as it is on disk.
+-   **Salesforce type filters and Use actions**: select multiple metadata types (the filter is hidden when only one type is present), then use a category or component-bundle button to replace its files with their version from the compared branch.
 -   **Revert**: shown only when the file differs from your current branch (local edits or after **Use `<branch>`**). After confirmation it puts the file back as it is in your branch (HEAD), dropping staged and unstaged changes. **Restore Changes** brings them back while VS Code is open (backups are shared between the single view and diff tabs).
 -   **View full Diff**: opens VS Code's diff editor with syntax highlighting.
 -   **Search** (`Ctrl+F`): filter thousands of files by name or folder, e.g. `AccountService` or `lwc/payment`.
 -   **Salesforce-aware grouping**: metadata is grouped by component type, related files are grouped together, and objects follow the Salesforce source-format folder hierarchy. Repositories without Salesforce structure continue to use regular file paths.
--   **Status, sorting and line totals**: filter by Added, Changed or Deleted; sort by name, number of changed files or line changes. Grouped rows show status and added/removed line totals before they are expanded.
--   Built for big comparisons: files are listed 200 at a time, unchanged files are collapsed, and bulk actions run as a few batched Git commands with a progress indicator. Hover any button to see what it does.
+-   **Status, sorting and line totals**: filter by New, Changed or Deleted; sort by name, number of changed files or line changes. Grouped rows show status and nonzero added/removed line totals before they are expanded.
+-   Built for big comparisons: categories with more than 200 changed files start collapsed, files are listed 200 at a time, unchanged files are collapsed, and bulk actions show completed file counts in their progress notifications. Hover any button to see what it does.
 -   **Always know what is happening**: long actions show the current step, a progress bar and the elapsed time; when they finish, a banner shows the result with an **Undo** button and the changed rows are highlighted. Errors show **Details** and are logged in the **Gitgg** output channel.
+-   **Keep working while actions run**: additional Use, Stage, Unstage or Revert requests enter a FIFO queue, and the panel shows how many actions are waiting.
 
 ### 🎯 Release Drift Detection
 Pick a commit (from a branch, by SHA or from your ⭐ favorite hashes) and see whether every file it touched still matches your working tree. Handles merge commits, root commits and renames. Use **Use `<sha>`** to bring the version from that commit.
@@ -67,7 +69,7 @@ Before promoting code, validate it against the target environment:
 
 The file list is the committed tree diff between the promotion branch's `HEAD` and the destination branch. For those files, Gitgg compares the current promotion working tree (including staged and unstaged edits) with the environment branch. The panel repeats these inputs above the results.
 
-Files are classified as `IDENTICAL`, `DIFFERENT`, `MISSING_IN_ENVIRONMENT` or `MISSING_IN_PROMOTION`. A Markdown report grouped by Salesforce component type (Apex classes, triggers, flows, LWC, Aura, objects, fields, layouts, profiles...) can be saved with the **Save Report** button in the panel: you choose where, and it reflects the current state of the comparison (including files you changed with **Use `<environment>`**). Nothing is written to your repository unless you save it.
+Files are classified as `IDENTICAL`, `DIFFERENT`, `MISSING_IN_ENVIRONMENT` or `MISSING_IN_PROMOTION`. A Markdown report grouped by Salesforce component type (Apex classes, triggers, flows, LWC, Aura, objects, fields, layouts, profiles...) can be saved with the **Save Report** button in the panel: you choose where, and it reflects the current state of the comparison (including files you changed with **Use `<environment>`**). When recognized Salesforce metadata is present, the panel also has a **Save Salesforce package.xml** button. This creates a Salesforce Metadata API manifest for retrieving or deploying Salesforce components; it is not a general file list. Other file types are skipped. Deleted metadata requires Salesforce's `destructiveChanges.xml`; it is not represented by `package.xml`. Nothing is written to your repository unless you save it.
 
 ### 📦 Export PR Snapshot
 Writes both versions of every file changed between your branch and a target branch into a `snapshot/` folder (configurable), preserving the original folder structure, plus a `SNAPSHOT_SUMMARY.md`. Handy for code reviews and deployments.

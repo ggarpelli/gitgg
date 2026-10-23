@@ -27,7 +27,7 @@ function getActiveDiff(): ActiveDiff | undefined {
         return undefined;
     }
     const { repo, ref, filePath } = parseRefUri(input.original);
-    return { git: new GitService(repo), baseRef: ref, filePath };
+    return { git: GitService.forRepo(repo), baseRef: ref, filePath };
 }
 
 async function setContext(values: Partial<Record<ContextKey, boolean>>): Promise<void> {

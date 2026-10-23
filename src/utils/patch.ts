@@ -5,6 +5,16 @@ export type ChangeKind = 'added' | 'changed' | 'deleted' | 'unchanged';
 /** Above this many edits jsdiff gives up, so a huge rewrite never freezes the extension host. */
 const MAX_EDIT_LENGTH = 20000;
 
+/**
+ * Wall-clock budget for diffing one file. `maxEditLength` alone does not bound the time: each edit
+ * step costs O(file length), so a very large file (a Salesforce profile or permission set, say)
+ * can grind for minutes and block everything, because the diff is synchronous.
+ */
+const DIFF_TIMEOUT_MS = 500;
+
+/** Beyond this, a file is not worth diffing inline; the diff editor handles it far better. */
+const MAX_INLINE_DIFF_CHARS = 2_000_000;
+
 export function normalizeLineEndings(content: string): string {
     return content.replace(/\r\n/g, '\n');
 }
@@ -55,18 +65,24 @@ export function buildPatch(filePath: string, baseContent: string | null, localCo
         return `${header}Binary files ${oldName} and ${newName} differ\n`;
     }
 
-    const patch = createTwoFilesPatch(
+    const before = normalizeLineEndings(baseContent ?? '');
+    const after = normalizeLineEndings(localContent ?? '');
+    const tooBig = before.length + after.length > MAX_INLINE_DIFF_CHARS;
+
+    const patch = tooBig ? undefined : createTwoFilesPatch(
         oldName,
         newName,
-        normalizeLineEndings(baseContent ?? ''),
-        normalizeLineEndings(localContent ?? ''),
+        before,
+        after,
         undefined,
         undefined,
-        { context: 3, headerOptions: FILE_HEADERS_ONLY, maxEditLength: MAX_EDIT_LENGTH }
+        { context: 3, headerOptions: FILE_HEADERS_ONLY, maxEditLength: MAX_EDIT_LENGTH, timeout: DIFF_TIMEOUT_MS }
     );
 
+    // Either the file is huge or the diff ran out of its budget: show a placeholder instead of
+    // freezing, and point at the diff editor, which handles files of any size.
     if (patch === undefined) {
-        return `${header}--- ${oldName}\n+++ ${newName}\n@@ -1,1 +1,1 @@\n-(diff too large to display inline)\n+(use "View full Diff" to see the changes)\n`;
+        return `${header}--- ${oldName}\n+++ ${newName}\n@@ -1,1 +1,1 @@\n-(this file is too large to diff inline)\n+(click "View full Diff" to see the changes)\n`;
     }
 
     return header + patch;

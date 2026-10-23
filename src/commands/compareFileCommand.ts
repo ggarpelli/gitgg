@@ -4,7 +4,8 @@ import { pickBranchWithFavorites } from '../ui/branchPicker';
 import { openRefDiff } from '../ui/refContentProvider';
 import { resolveGitService } from '../ui/repo';
 import { DiffPanel } from '../views/diffPanel';
-import { compareWithProgress } from '../ui/feedback';
+import { compareWithProgress, runCancellable } from '../ui/feedback';
+import { throwIfAborted } from '../utils/concurrency';
 import { getConfig } from '../config';
 
 /**
@@ -105,23 +106,19 @@ export async function runCompareFileCommand(context: vscode.ExtensionContext, ar
         location: vscode.ProgressLocation.Notification,
         title: 'Gitgg',
         cancellable: true
-    }, async (progress, token) => {
+    }, async (progress, token) => runCancellable(token, async signal => {
         progress.report({ message: `Resolving '${targetBranch}'...` });
-        const { ref: baseRef, warning } = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare);
+        const { ref: baseRef, warning } = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare, signal);
         if (warning) {
             vscode.window.showWarningMessage(`Gitgg: ${warning}`);
         }
-        if (token.isCancellationRequested) {
-            return;
-        }
+        throwIfAborted(signal);
 
-        const localLabel = await buildLocalLabel(git, currentBranch, relativePaths);
+        const localLabel = await buildLocalLabel(git, currentBranch, relativePaths, signal);
 
         if (mode === 'separate') {
             for (const [index, relativePath] of relativePaths.entries()) {
-                if (token.isCancellationRequested) {
-                    return;
-                }
+                throwIfAborted(signal);
                 progress.report({
                     message: `Opening diff ${index + 1} of ${relativePaths.length} files...`,
                     increment: 100 / relativePaths.length
@@ -132,10 +129,8 @@ export async function runCompareFileCommand(context: vscode.ExtensionContext, ar
         }
 
         progress.report({ message: `Comparing ${relativePaths.length} files...` });
-        const comparison = await compareWithProgress(git, baseRef, relativePaths, progress, token);
-        if (token.isCancellationRequested) {
-            return;
-        }
+        const comparison = await compareWithProgress(git, baseRef, relativePaths, progress, signal);
+        throwIfAborted(signal);
 
         await DiffPanel.open(context, git, {
             viewType: 'gitgg-diff-summary',
@@ -146,12 +141,12 @@ export async function runCompareFileCommand(context: vscode.ExtensionContext, ar
             filePaths: relativePaths,
             initialComparison: comparison
         });
-    });
+    }));
 }
 
 /** "main" or "main (working tree)" when any of the files has uncommitted changes. */
-async function buildLocalLabel(git: GitService, currentBranch: string, relativePaths: string[]): Promise<string> {
-    const status = await git.getStatus();
+async function buildLocalLabel(git: GitService, currentBranch: string, relativePaths: string[], signal?: AbortSignal): Promise<string> {
+    const status = await git.getStatus(signal);
     const dirty = new Set(status.files.map(file => file.path));
     const branchLabel = currentBranch || 'HEAD';
     return relativePaths.some(relativePath => dirty.has(relativePath)) ? `${branchLabel} (working tree)` : branchLabel;

@@ -4,10 +4,12 @@ import * as fs from 'fs';
 import { FileComparison, GitService } from '../services/gitService';
 import { serializeForScriptTag } from '../utils/patch';
 import { backupStore } from '../services/backupStore';
+import { createAbortError, isAbortError } from '../utils/concurrency';
 import { openRefDiff } from '../ui/refContentProvider';
 import { fireFilesChanged, onDidChangeFiles, saveDirtyDocuments } from '../ui/fileEvents';
 import { getConfig } from '../config';
 import { errorMessage, logError, showError } from '../ui/feedback';
+import { buildSalesforcePackageManifest } from '../services/salesforcePackage';
 
 /** Optional report the user can save from the panel (used by PR Comparison). */
 export interface PanelReport {
@@ -15,6 +17,11 @@ export interface PanelReport {
     defaultFileName: string;
     /** Builds the report from the current comparison, so it reflects actions done in the panel. */
     build(files: FileComparison[]): string;
+}
+
+export interface PanelPackageXml {
+    defaultFileName: string;
+    apiVersion: string;
 }
 
 export interface DiffPanelOptions {
@@ -30,6 +37,7 @@ export interface DiffPanelOptions {
     /** Comparison already computed by the command, to avoid doing it twice on open. */
     initialComparison?: FileComparison[];
     report?: PanelReport;
+    packageXml?: PanelPackageXml;
 }
 
 interface WebviewFile {
@@ -51,12 +59,14 @@ interface WebviewPayload {
     lineLimit: number;
     /** Shows the "Save Report" button. */
     hasReport: boolean;
+    /** Shows the "Save Salesforce package.xml" button. */
+    hasPackageXml: boolean;
 }
 
 interface PanelMessage {
     command: string;
     path?: string;
-    /** For "undo": the files to restore. */
+    /** Explicit file paths for actions such as selective staging and undo. */
     paths?: string[];
 }
 
@@ -75,7 +85,7 @@ interface PlannedAction {
     rowPath?: string;
     /** Files that can be restored afterwards, offered as an "Undo" button in the result banner. */
     undoable?: boolean;
-    run(report: (message: string) => void): Promise<string>;
+    run(report: (message: string) => void, reportFiles: (phase: string, done: number, total: number) => void): Promise<string>;
 }
 
 /**
@@ -90,7 +100,12 @@ interface PlannedAction {
 export class DiffPanel {
     private readonly panel: vscode.WebviewPanel;
     private readonly comparison = new Map<string, FileComparison>();
-    private queue: Promise<void> = Promise.resolve();
+    /** Title of the action currently running, or undefined when idle. */
+    private running: string | undefined;
+    /** Repository-changing clicks are processed in FIFO order so users can keep working. */
+    private readonly actionQueue: PanelMessage[] = [];
+    private processingQueue = false;
+    private readonly pendingExternalRefresh = new Set<string>();
 
     private constructor(
         private readonly context: vscode.ExtensionContext,
@@ -104,8 +119,7 @@ export class DiffPanel {
         });
 
         const messageListener = this.panel.webview.onDidReceiveMessage((msg: PanelMessage) => {
-            // Serialize actions so two quick clicks never run Git commands concurrently on the same files.
-            this.queue = this.queue.then(() => this.handleMessage(msg)).catch(error => showError('Action failed', error));
+            void this.handleMessage(msg).catch(error => showError('Action failed', error));
         });
         // Keep in sync with changes made from diff tabs or other panels.
         const changeListener = onDidChangeFiles(event => {
@@ -114,7 +128,11 @@ export class DiffPanel {
             }
             const touched = event.paths.filter(filePath => this.comparison.has(filePath));
             if (touched.length > 0) {
-                this.queue = this.queue.then(() => this.refresh(touched)).catch(() => undefined);
+                if (this.processingQueue || this.running) {
+                    touched.forEach(filePath => this.pendingExternalRefresh.add(filePath));
+                } else {
+                    void this.refresh(touched).catch(() => undefined);
+                }
             }
         });
         this.panel.onDidDispose(() => {
@@ -132,6 +150,7 @@ export class DiffPanel {
     }
 
     private async handleMessage(msg: PanelMessage): Promise<void> {
+        // Open and export actions stay available while a repository-changing action runs.
         if (msg.command === 'openDiff' && msg.path) {
             await openRefDiff(this.git, this.options.baseRef, msg.path, this.options.baseLabel, this.options.localLabel);
             return;
@@ -140,14 +159,115 @@ export class DiffPanel {
             await this.saveReport();
             return;
         }
-
-        const action = msg.command === 'undo'
-            ? await this.planRestore(msg.paths ?? [], false)
-            : await this.planAction(msg);
-        if (!action) {
+        if (msg.command === 'savePackageXml') {
+            await this.savePackageXml();
             return;
         }
-        await this.runAction(action);
+
+        this.actionQueue.push(msg);
+        await this.postQueueStatus();
+        void this.processActionQueue();
+    }
+
+    /** Processes accepted clicks in order, planning each one against the latest repository state. */
+    private async processActionQueue(): Promise<void> {
+        if (this.processingQueue) {
+            return;
+        }
+        this.processingQueue = true;
+        try {
+            while (this.actionQueue.length > 0) {
+                const msg = this.actionQueue.shift()!;
+                this.running = 'Preparing action';
+                await this.postQueueStatus();
+                let action: PlannedAction | undefined;
+                try {
+                    action = msg.command === 'undo'
+                        ? await this.planRestore(msg.paths ?? [], false)
+                        : await this.planAction(msg);
+                    if (!action) {
+                        await this.post({ command: 'result', kind: 'warning', text: this.nothingToDoMessage(msg.command) });
+                        continue;
+                    }
+                    this.running = action.title;
+                    await this.postQueueStatus();
+                    await this.runAction(action);
+                } catch (error) {
+                    // runAction already reports its own failures. This branch reports planning errors only.
+                    if (!isAbortError(error) && !action) {
+                        logError('Preparing action', error);
+                        await this.post({ command: 'result', kind: 'error', text: `Action failed: ${errorMessage(error).split('\n')[0]}`, details: errorMessage(error) });
+                        await showError('Action failed', error);
+                    }
+                } finally {
+                    this.running = undefined;
+                    await this.refreshPendingExternalChanges();
+                    await this.postQueueStatus();
+                }
+            }
+        } finally {
+            await this.refreshPendingExternalChanges();
+            this.processingQueue = false;
+            this.running = undefined;
+            await this.postQueueStatus();
+        }
+    }
+
+    private async refreshPendingExternalChanges(): Promise<void> {
+        while (this.pendingExternalRefresh.size > 0) {
+            const paths = Array.from(this.pendingExternalRefresh);
+            this.pendingExternalRefresh.clear();
+            this.running = 'Refreshing the comparison';
+            try {
+                await this.refresh(paths);
+            } catch (error) {
+                logError('Refreshing the comparison', error);
+            } finally {
+                this.running = undefined;
+            }
+        }
+    }
+
+    private async postQueueStatus(): Promise<void> {
+        const activeOffset = this.running ? 1 : 0;
+        await this.post({
+            command: 'queue',
+            active: !!this.running,
+            pending: this.actionQueue.length,
+            items: this.actionQueue.map((msg, index) => ({
+                path: msg.path ?? msg.paths?.[0],
+                position: index + 1 + activeOffset,
+                label: this.queueActionLabel(msg)
+            }))
+        });
+    }
+
+    private queueActionLabel(msg: PanelMessage): string {
+        const base = this.options.baseLabel;
+        switch (msg.command) {
+            case 'acceptFile':
+                return `Use ${base} version`;
+            case 'acceptFiles':
+                return `Use ${base} version for ${plural(msg.paths?.length ?? 0)}`;
+            case 'acceptAll':
+                return `Use all from ${base}`;
+            case 'stageFile':
+            case 'stageFiles':
+            case 'stageAll':
+                return 'Stage files';
+            case 'unstageFile':
+            case 'unstageAll':
+                return 'Unstage files';
+            case 'revertFile':
+            case 'revertAll':
+                return 'Revert files';
+            case 'restoreFile':
+            case 'restoreAll':
+            case 'undo':
+                return 'Restore files';
+            default:
+                return 'Action';
+        }
     }
 
     /**
@@ -174,8 +294,19 @@ export class DiffPanel {
                     progress.report({ message: stepText, increment: 100 / totalSteps });
                     void this.post({ command: 'busy', ...scope, text: action.title, detail: stepText, step, totalSteps });
                 };
+                const reportFiles = (phase: string, done: number, total: number) => {
+                    const detail = `${phase} ${done.toLocaleString()} of ${total.toLocaleString()} files...`;
+                    progress.report({ message: detail });
+                    void this.post({ command: 'busy', ...scope, text: action.title, detail, step, totalSteps });
+                };
                 await saveDirtyDocuments(this.git, action.touchedPaths);
-                const text = await action.run(report);
+                if (action.bulk) {
+                    reportFiles(action.title.split(' ')[0], 0, action.affectedPaths.length);
+                }
+                const text = await action.run(report, reportFiles);
+                if (action.bulk) {
+                    reportFiles(action.title.split(' ')[0], action.affectedPaths.length, action.affectedPaths.length);
+                }
                 report('refreshing the comparison...');
                 await this.refresh(action.touchedPaths);
                 fireFilesChanged({ repoPath: this.git.getRepoPath(), paths: action.affectedPaths, source: this });
@@ -217,9 +348,21 @@ export class DiffPanel {
                 return paths.length === 0 ? undefined : {
                     title: `Staging ${plural(paths.length)}`, touchedPaths: [], affectedPaths: paths, bulk: paths.length > 1, steps: 1,
                     rowPath: msg.command === 'stageFile' ? filePath : undefined,
-                    run: async report => {
+                    run: async (report, reportFiles) => {
                         report('git add...');
-                        await this.git.stageFiles(paths);
+                        await this.git.stageFiles(paths, (done, total) => reportFiles('Staging', done, total));
+                        return `Staged ${plural(paths.length)}.`;
+                    }
+                };
+            }
+            case 'stageFiles': {
+                const requested = new Set(msg.paths ?? []);
+                const paths = (await this.localChanges()).unstaged.filter(path => requested.has(path));
+                return paths.length === 0 ? undefined : {
+                    title: `Staging ${plural(paths.length)}`, touchedPaths: [], affectedPaths: paths, bulk: paths.length > 1, steps: 1,
+                    run: async (report, reportFiles) => {
+                        report('git add...');
+                        await this.git.stageFiles(paths, (done, total) => reportFiles('Staging', done, total));
                         return `Staged ${plural(paths.length)}.`;
                     }
                 };
@@ -230,29 +373,40 @@ export class DiffPanel {
                 return paths.length === 0 ? undefined : {
                     title: `Unstaging ${plural(paths.length)}`, touchedPaths: [], affectedPaths: paths, bulk: paths.length > 1, steps: 1,
                     rowPath: msg.command === 'unstageFile' ? filePath : undefined,
-                    run: async report => {
+                    run: async (report, reportFiles) => {
                         report('git reset...');
-                        await this.git.unstageFiles(paths);
+                        await this.git.unstageFiles(paths, (done, total) => reportFiles('Unstaging', done, total));
                         return `Unstaged ${plural(paths.length)}.`;
                     }
                 };
             }
             case 'acceptFile':
+            case 'acceptFiles':
             case 'acceptAll': {
-                const paths = msg.command === 'acceptFile' ? [filePath] : this.changedPaths();
+                const changedPaths = this.changedPaths();
+                const requestedPaths = new Set(msg.paths ?? []);
+                const paths = msg.command === 'acceptFile'
+                    ? [filePath]
+                    : msg.command === 'acceptFiles'
+                        ? changedPaths.filter(path => requestedPaths.has(path))
+                        : changedPaths;
                 if (paths.length === 0) {
                     return undefined;
                 }
-                if (paths.length > 1 && !await this.confirm(
-                    `Replace ${plural(paths.length)} with their version from ${base} and stage them? You can undo it with "Restore All Changes".`,
-                    'Use Branch Version')) {
-                    return undefined;
+                if (paths.length > 1) {
+                    await this.confirm(
+                        `Replace ${plural(paths.length)} with their version from ${base} and stage them? You can undo it with "Restore All Changes".`,
+                        `Use ${base} version`);
                 }
                 return {
                     title: `Using the ${base} version of ${plural(paths.length)}`, touchedPaths: paths, affectedPaths: paths, bulk: paths.length > 1, steps: 3,
                     rowPath: msg.command === 'acceptFile' ? filePath : undefined, undoable: true,
-                    run: async report => {
-                        await backupStore.apply(this.git, paths, () => this.git.takeFilesFromRef(this.options.baseRef, paths), report);
+                    run: async (report, reportFiles) => {
+                        await backupStore.apply(this.git, paths, () => this.git.takeFilesFromRef(
+                            this.options.baseRef,
+                            paths,
+                            (done, total) => reportFiles('Updating files', done, total)
+                        ), report, reportFiles);
                         return paths.length === 1
                             ? `${paths[0]} now matches ${base} and is staged.`
                             : `${plural(paths.length)} now match ${base} and are staged.`;
@@ -266,16 +420,17 @@ export class DiffPanel {
                     return undefined;
                 }
                 const target = paths.length === 1 ? paths[0] : plural(paths.length);
-                if (!await this.confirm(
+                await this.confirm(
                     `Revert ${target} to the version in your current branch (HEAD)? Staged and unstaged changes will be discarded. You can undo it with "Restore Changes".`,
-                    'Revert')) {
-                    return undefined;
-                }
+                    'Revert');
                 return {
                     title: `Reverting ${plural(paths.length)}`, touchedPaths: paths, affectedPaths: paths, bulk: paths.length > 1, steps: 3,
                     rowPath: msg.command === 'revertFile' ? filePath : undefined, undoable: true,
-                    run: async report => {
-                        const changed = await backupStore.apply(this.git, paths, () => this.git.revertToHead(paths), report);
+                    run: async (report, reportFiles) => {
+                        const changed = await backupStore.apply(this.git, paths, () => this.git.revertToHead(
+                            paths,
+                            (done, total) => reportFiles('Updating files', done, total)
+                        ), report, reportFiles);
                         return changed === 0 ? 'Nothing to revert.' : `Reverted ${plural(changed)}.`;
                     }
                 };
@@ -302,14 +457,10 @@ export class DiffPanel {
             const message = editedSince.size > 0
                 ? `${entries[0].filePath} has changed since the last action. Restoring will overwrite the current file contents.`
                 : `Restore ${entries[0].filePath} to how it was before?`;
-            if (!await this.confirm(message, 'Restore')) {
-                return undefined;
-            }
+            await this.confirm(message, 'Restore');
         } else {
             const skipNote = editedSince.size > 0 ? ` ${plural(editedSince.size)} edited since then will be skipped.` : '';
-            if (!await this.confirm(`Restore ${plural(entries.length)} to how they were before?${skipNote}`, 'Restore All')) {
-                return undefined;
-            }
+            await this.confirm(`Restore ${plural(entries.length)} to how they were before?${skipNote}`, 'Restore All');
             toRestore = entries.filter(entry => !editedSince.has(entry.filePath));
         }
 
@@ -320,16 +471,19 @@ export class DiffPanel {
             bulk: toRestore.length > 1,
             steps: 2,
             rowPath: askConfirmation && entries.length === 1 ? entries[0].filePath : undefined,
-            run: async report => {
-                await backupStore.restore(this.git, toRestore, report);
+            run: async (report, reportFiles) => {
+                await backupStore.restore(this.git, toRestore, report, reportFiles);
                 const skipped = entries.length - toRestore.length;
                 return `Restored ${plural(toRestore.length)}.${skipped > 0 ? ` Skipped ${plural(skipped)} edited since the last action.` : ''}`;
             }
         };
     }
 
-    private async confirm(message: string, action: string): Promise<boolean> {
-        return (await vscode.window.showWarningMessage(message, { modal: true }, action)) === action;
+    /** Asks for confirmation; throws an AbortError (a silent stop) when the user declines. */
+    private async confirm(message: string, action: string): Promise<void> {
+        if (await vscode.window.showWarningMessage(message, { modal: true }, action) !== action) {
+            throw createAbortError();
+        }
     }
 
     private setComparison(files: FileComparison[]): void {
@@ -349,6 +503,29 @@ export class DiffPanel {
         const staged = status.staged.filter(inPanel);
         const unstaged = status.files.filter(file => file.working_dir !== ' ' && inPanel(file.path)).map(file => file.path);
         return { staged, unstaged, all: Array.from(new Set([...staged, ...unstaged])) };
+    }
+
+    /** Explains why a button did nothing, so it never looks broken. */
+    private nothingToDoMessage(command: string): string {
+        const base = this.options.baseLabel;
+        switch (command) {
+            case 'stageFile':
+            case 'stageAll':
+            case 'stageFiles':
+                return 'Nothing to stage: no file here has unstaged changes.';
+            case 'unstageFile':
+            case 'unstageAll':
+                return 'Nothing to unstage: no file here is staged.';
+            case 'acceptFile':
+            case 'acceptFiles':
+            case 'acceptAll':
+                return `Nothing to do: every file here already matches ${base}.`;
+            case 'revertFile':
+            case 'revertAll':
+                return 'Nothing to revert: no file here differs from your current branch (HEAD).';
+            default:
+                return 'Nothing to restore: no file here was changed from this panel.';
+        }
     }
 
     private restorablePaths(): string[] {
@@ -372,6 +549,43 @@ export class DiffPanel {
         const content = report.build(Array.from(this.comparison.values()).sort((a, b) => a.path.localeCompare(b.path)));
         await vscode.workspace.fs.writeFile(target, Buffer.from(content, 'utf8'));
         const choice = await vscode.window.showInformationMessage(`Gitgg: Report saved to ${target.fsPath}`, 'Open', 'Reveal in File Explorer');
+        if (choice === 'Open') {
+            await vscode.window.showTextDocument(target, { viewColumn: vscode.ViewColumn.Beside, preview: true });
+        } else if (choice === 'Reveal in File Explorer') {
+            await vscode.commands.executeCommand('revealFileInOS', target);
+        }
+    }
+
+    /** Saves the Salesforce Metadata API package.xml for the Salesforce components in this comparison. */
+    private async savePackageXml(): Promise<void> {
+        const packageXml = this.options.packageXml;
+        if (!packageXml) {
+            return;
+        }
+        const files = Array.from(this.comparison.values());
+        const manifest = buildSalesforcePackageManifest(
+            files.filter(file => file.localContent !== null).map(file => file.path),
+            packageXml.apiVersion
+        );
+        if (manifest.componentCount === 0) {
+            await vscode.window.showInformationMessage('Gitgg: No Salesforce metadata components remain in this comparison to include in a Salesforce package.xml manifest.');
+            return;
+        }
+
+        const target = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file(this.git.toAbsolutePath(packageXml.defaultFileName)),
+            filters: { XML: ['xml'] },
+            saveLabel: 'Save package.xml',
+            title: 'Save Salesforce package.xml manifest'
+        });
+        if (!target) {
+            return;
+        }
+        await vscode.workspace.fs.writeFile(target, Buffer.from(manifest.xml, 'utf8'));
+        const choice = await vscode.window.showInformationMessage(
+            `Gitgg: Saved Salesforce package.xml with ${manifest.componentCount} recognized metadata component${manifest.componentCount === 1 ? '' : 's'} across ${manifest.typeCount} type${manifest.typeCount === 1 ? '' : 's'}. Other file types are omitted; deletions require a Salesforce destructiveChanges.xml manifest.`,
+            'Open', 'Reveal in File Explorer'
+        );
         if (choice === 'Open') {
             await vscode.window.showTextDocument(target, { viewColumn: vscode.ViewColumn.Beside, preview: true });
         } else if (choice === 'Reveal in File Explorer') {
@@ -405,7 +619,8 @@ export class DiffPanel {
             status: { staged, unstaged },
             restorableFiles: this.restorablePaths(),
             lineLimit: getConfig().diffLineLimit,
-            hasReport: !!this.options.report
+            hasReport: !!this.options.report,
+            hasPackageXml: !!this.options.packageXml
         };
     }
 

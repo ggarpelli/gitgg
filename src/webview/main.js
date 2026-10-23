@@ -16,8 +16,10 @@ const summaryBranches = document.getElementById('summary-branches');
 const contextNote = document.getElementById('context-note');
 const searchInput = document.getElementById('search');
 const statusFilter = document.getElementById('status-filter');
+const componentFilters = document.getElementById('component-filters');
 const searchCount = document.getElementById('search-count');
 const busyBanner = document.getElementById('busy-banner');
+const queueBanner = document.getElementById('queue-banner');
 const resultBanner = document.getElementById('result-banner');
 
 /** Row elements by file path, rebuilt on every render (used for row spinners and highlights). */
@@ -27,6 +29,7 @@ const lineChangeCache = new WeakMap();
 /** How many files are rendered at once per section; "Show more" renders the next page. */
 const PAGE_SIZE = 200;
 const AUTO_EXPAND_MAX_ITEMS = 12;
+const AUTO_COLLAPSE_CATEGORIES_THRESHOLD = PAGE_SIZE;
 
 // --- 1. State ---
 let state = JSON.parse(document.getElementById('json-data').textContent);
@@ -34,6 +37,13 @@ const savedViewState = vscode.getState() || {};
 const view = {
     query: savedViewState.query || '',
     statusFilter: savedViewState.statusFilter || 'all',
+    componentTypeFilters: new Set(
+        Array.isArray(savedViewState.componentTypeFilters)
+            ? savedViewState.componentTypeFilters
+            : savedViewState.componentTypeFilter && savedViewState.componentTypeFilter !== 'all'
+                ? [savedViewState.componentTypeFilter]
+                : []
+    ),
     showUnchanged: savedViewState.showUnchanged || false,
     limits: { unchanged: PAGE_SIZE },
     // Diffs the user opened stay open across refreshes.
@@ -49,6 +59,7 @@ function saveViewState() {
     vscode.setState({
         query: view.query,
         statusFilter: view.statusFilter,
+        componentTypeFilters: Array.from(view.componentTypeFilters),
         showUnchanged: view.showUnchanged,
         expanded: Array.from(view.expanded),
         collapsedGroups: Array.from(view.collapsedGroups),
@@ -165,6 +176,61 @@ function getSalesforceFileType(filePath) {
         return { group, label };
     }
     return { group: 'Other Files', label: '' };
+}
+
+function getComponentFilterLabel(filePath) {
+    const type = getSalesforceFileType(filePath);
+    if (type.group === 'Apex Classes' || type.group === 'Apex Triggers') return 'Apex';
+    const label = type.label || type.group;
+    const key = label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const knownLabels = {
+        lwc: 'LWC',
+        aura: 'Aura',
+        flexipage: 'Lightning Page',
+        customobject: 'Object',
+        customfield: 'Field',
+        profile: 'Profile',
+        permissionset: 'Permission Set',
+        permissionsetgroup: 'Permission Set Group',
+        lightningcomponentbundle: 'LWC',
+        auradefinitionbundle: 'Aura',
+        customlabel: 'Custom Label',
+        customlabels: 'Custom Labels',
+        staticresource: 'Static Resource',
+        workflow: 'Workflow',
+        validationrule: 'Validation Rule',
+        recordtype: 'Record Type',
+        fieldset: 'Field Set',
+        compactlayout: 'Compact Layout',
+        visualforcepage: 'Visualforce Page',
+        visualforcecomponent: 'Visualforce Component',
+        approvalprocess: 'Approval Process',
+        custommetadata: 'Custom Metadata',
+        custompermission: 'Custom Permission',
+        quickaction: 'Quick Action',
+        sharingrules: 'Sharing Rule',
+        duplicate: 'Duplicate Rule'
+    };
+    if (knownLabels[key]) return knownLabels[key];
+    if (label === label.toUpperCase()) {
+        const groupLabels = {
+            'Lightning Pages': 'Lightning Page',
+            'Visualforce Pages': 'Visualforce Page',
+            'Visualforce Components': 'Visualforce Component',
+            'Profiles': 'Profile',
+            'Permission Sets': 'Permission Set',
+            'Permission Set Groups': 'Permission Set Group',
+            'Static Resources': 'Static Resource',
+            'Flows': 'Flow'
+        };
+        if (groupLabels[type.group]) return groupLabels[type.group];
+        return label.toLowerCase().replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+    return label;
+}
+
+function matchesComponentType(file) {
+    return view.componentTypeFilters.size === 0 || view.componentTypeFilters.has(getComponentFilterLabel(file.filePath));
 }
 
 function buildDisplayItems(entries) {
@@ -292,16 +358,23 @@ function collectObjectFolderEntries(node) {
 }
 
 function createLineChangeSummary(added, removed) {
+    if (added <= 0 && removed <= 0) return null;
+
     const summary = document.createElement('span');
     summary.className = 'line-change-summary';
     summary.title = 'Added and removed text lines across the files in this group.';
-    const additions = document.createElement('span');
-    additions.className = 'line-change-added';
-    additions.textContent = `+${added}`;
-    const removals = document.createElement('span');
-    removals.className = 'line-change-removed';
-    removals.textContent = `−${removed}`;
-    summary.append(additions, removals);
+    if (added > 0) {
+        const additions = document.createElement('span');
+        additions.className = 'line-change-added';
+        additions.textContent = `+${added}`;
+        summary.appendChild(additions);
+    }
+    if (removed > 0) {
+        const removals = document.createElement('span');
+        removals.className = 'line-change-removed';
+        removals.textContent = `−${removed}`;
+        summary.appendChild(removals);
+    }
     return summary;
 }
 
@@ -315,9 +388,11 @@ function createBundleStatusBadges(entries) {
     activeStatuses.forEach(([type, count]) => {
         const badge = document.createElement('span');
         const variant = type === 'changed' ? 'badge-border' : 'badge-bg';
+        const label = type === 'added' ? 'NEW' : type.toUpperCase();
         badge.className = `status-badge ${variant} status-${type}-bg bundle-status-badge`;
-        badge.textContent = activeStatuses.length === 1 ? type.toUpperCase() : `${type.toUpperCase()} ${count}`;
-        badge.title = `${count} ${type} ${count === 1 ? 'file' : 'files'} in this group`;
+        badge.textContent = activeStatuses.length === 1 ? label : `${label} ${count}`;
+        const description = type === 'added' ? 'new' : type;
+        badge.title = `${count} ${description} ${count === 1 ? 'file' : 'files'} in this group`;
         fragment.appendChild(badge);
     });
     return fragment;
@@ -352,8 +427,95 @@ function button(className, label, tooltip, attributes = '') {
     return `<button class="status-button ${className}" title="${escapeHtml(tooltip)}" ${attributes}>${escapeHtml(label)}</button>`;
 }
 
+function createUseFilesButton(paths, description, buttonClass) {
+    const useButton = document.createElement('button');
+    const count = paths.length;
+    useButton.type = 'button';
+    useButton.className = `status-button ${buttonClass}`;
+    useButton.textContent = `Use ${state.targetBranch} (${count})`;
+    useButton.title = `Replace ${count} file${count === 1 ? '' : 's'} in ${description} with the version from ${state.targetBranch} and stage them.`;
+    useButton.disabled = count === 0;
+    useButton.addEventListener('click', event => {
+        event.stopPropagation();
+        if (count > 0) vscode.postMessage({ command: 'acceptFiles', paths, path: paths[0] });
+    });
+    return useButton;
+}
+
 function matchesQuery(file) {
     return !view.query || file.filePath.toLowerCase().includes(view.query.toLowerCase());
+}
+
+function renderComponentFilters() {
+    const files = [
+        ...state.addedFiles,
+        ...state.changedFiles,
+        ...state.deletedFiles,
+        ...state.unchangedFiles
+    ];
+    const labels = Array.from(new Set(files.map(file => getComponentFilterLabel(file.filePath))));
+    if (labels.length <= 1) {
+        if (view.componentTypeFilters.size > 0) {
+            view.componentTypeFilters.clear();
+            saveViewState();
+        }
+        componentFilters.innerHTML = '';
+        componentFilters.hidden = true;
+        return;
+    }
+
+    const priority = ['Apex', 'LWC', 'Aura', 'Flow', 'Object', 'Field'];
+    labels.sort((left, right) => {
+        const leftIndex = priority.indexOf(left);
+        const rightIndex = priority.indexOf(right);
+        if (leftIndex >= 0 || rightIndex >= 0) {
+            if (leftIndex < 0) return 1;
+            if (rightIndex < 0) return -1;
+            if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+        }
+        return left.localeCompare(right);
+    });
+    let removedStaleFilter = false;
+    for (const selectedType of view.componentTypeFilters) {
+        if (!labels.includes(selectedType)) {
+            view.componentTypeFilters.delete(selectedType);
+            removedStaleFilter = true;
+        }
+    }
+    if (removedStaleFilter) {
+        saveViewState();
+    }
+
+    componentFilters.innerHTML = '';
+    const options = ['all', ...labels];
+    options.forEach(value => {
+        const filterButton = document.createElement('button');
+        filterButton.type = 'button';
+        const isSelected = value === 'all'
+            ? view.componentTypeFilters.size === 0
+            : view.componentTypeFilters.has(value);
+        filterButton.className = `component-filter-chip${isSelected ? ' active' : ''}`;
+        filterButton.textContent = value === 'all' ? 'All types' : value;
+        filterButton.title = value === 'all'
+            ? 'Clear component type filters and show every type'
+            : `Toggle ${value} files in the component type filter`;
+        filterButton.setAttribute('aria-pressed', String(isSelected));
+        filterButton.addEventListener('click', () => {
+            if (value === 'all') {
+                view.componentTypeFilters.clear();
+            } else if (view.componentTypeFilters.has(value)) {
+                view.componentTypeFilters.delete(value);
+            } else {
+                view.componentTypeFilters.add(value);
+            }
+            view.limits = { unchanged: PAGE_SIZE };
+            saveViewState();
+            renderComponentFilters();
+            renderFileSections();
+        });
+        componentFilters.appendChild(filterButton);
+    });
+    componentFilters.hidden = false;
 }
 
 // --- 3. Tooltips (one place, so every button explains itself) ---
@@ -369,6 +531,7 @@ const tips = {
     restore: 'Undo the last "Use" or "Revert" on this file: brings back its previous content and staging state.',
     restoreAll: 'Undo every "Use" and "Revert" done in this panel. Files edited since then are skipped.',
     saveReport: 'Save the PR comparison report (Markdown) to a file you choose, with the current state of this comparison. Easy to share.',
+    savePackageXml: 'Save a Salesforce Metadata API package.xml manifest for the Salesforce components in this PR diff. This is Salesforce-specific, not a general file list.',
     diff: () => `Open the full diff (${state.targetBranch} ↔ ${state.localFileLabel}) in the VS Code diff editor.`,
 };
 
@@ -382,7 +545,7 @@ function renderSummary() {
     const totalChanges = counts.added + counts.changed + counts.deleted;
 
     let details = '';
-    if (counts.added > 0) details += `<span class="summary-item summary-item-added" title="Files that exist only in your working tree">Added: ${counts.added}</span>`;
+    if (counts.added > 0) details += `<span class="summary-item summary-item-added" title="New files that exist only in your working tree">New: ${counts.added}</span>`;
     if (counts.changed > 0) details += `<span class="summary-item summary-item-changed" title="Files with different content">Changed: ${counts.changed}</span>`;
     if (counts.deleted > 0) details += `<span class="summary-item summary-item-deleted" title="Files that exist only in ${escapeHtml(state.targetBranch)}">Deleted: ${counts.deleted}</span>`;
 
@@ -441,7 +604,7 @@ function renderFile(container, file, fileType) {
         header.style.cursor = 'pointer';
         header.title = 'Click to show or hide the changes';
         if (fileType === 'added') {
-            statusBadge = '<span class="status-badge badge-bg status-added-bg" title="Exists only in your working tree">ADDED</span>';
+            statusBadge = '<span class="status-badge badge-bg status-added-bg" title="New file that exists only in your working tree">NEW</span>';
         } else if (fileType === 'deleted') {
             statusBadge = `<span class="status-badge badge-bg status-deleted-bg" title="Exists only in ${escapeHtml(state.targetBranch)}">DELETED</span>`;
         } else {
@@ -574,19 +737,28 @@ function renderFileSections() {
         ...state.addedFiles.map(f => [f, 'added']),
         ...state.changedFiles.map(f => [f, 'changed']),
         ...state.deletedFiles.map(f => [f, 'deleted']),
-    ].filter(([file]) => matchesQuery(file)).sort((left, right) => left[0].filePath.localeCompare(right[0].filePath));
+    ].filter(([file]) => matchesQuery(file) && matchesComponentType(file)).sort((left, right) => left[0].filePath.localeCompare(right[0].filePath));
     const changes = allChanges.filter(([, type]) => view.statusFilter === 'all' || type === view.statusFilter);
     const unchanged = view.statusFilter === 'all'
-        ? state.unchangedFiles.map(f => [f, 'unchanged']).filter(([file]) => matchesQuery(file))
+        ? state.unchangedFiles.map(f => [f, 'unchanged']).filter(([file]) => matchesQuery(file) && matchesComponentType(file))
         : [];
 
     const allTotal = state.addedFiles.length + state.changedFiles.length + state.deletedFiles.length + state.unchangedFiles.length;
+    const typeTotal = [state.addedFiles, state.changedFiles, state.deletedFiles, state.unchangedFiles]
+        .flat()
+        .filter(matchesComponentType).length;
     const statusTotal = view.statusFilter === 'all'
-        ? allTotal
-        : ({ added: state.addedFiles.length, changed: state.changedFiles.length, deleted: state.deletedFiles.length }[view.statusFilter] || 0);
+        ? typeTotal
+        : ({ added: state.addedFiles, changed: state.changedFiles, deleted: state.deletedFiles }[view.statusFilter] || [])
+            .filter(matchesComponentType).length;
     const matchingTotal = changes.length + unchanged.length;
-    searchCount.textContent = view.query || view.statusFilter !== 'all'
-        ? `${matchingTotal} of ${statusTotal} files match`
+    const hasComponentTypeFilters = view.componentTypeFilters.size > 0;
+    const hasFilters = view.query || view.statusFilter !== 'all' || hasComponentTypeFilters;
+    const denominator = hasComponentTypeFilters && !view.query && view.statusFilter === 'all'
+        ? allTotal
+        : statusTotal;
+    searchCount.textContent = hasFilters
+        ? `${matchingTotal} of ${denominator} files${view.query || view.statusFilter !== 'all' ? ' match' : ''}`
         : `${allTotal} files`;
 
     diffContainer.innerHTML = '';
@@ -594,8 +766,8 @@ function renderFileSections() {
     if (changes.length === 0 && unchanged.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'empty-message';
-        empty.textContent = view.query || view.statusFilter !== 'all'
-            ? 'No files match the current search and status filter.'
+        empty.textContent = view.query || view.statusFilter !== 'all' || hasComponentTypeFilters
+            ? 'No files match the current search and filters.'
             : 'No files to show.';
         diffContainer.appendChild(empty);
         return;
@@ -603,6 +775,7 @@ function renderFileSections() {
 
     const displayItems = buildDisplayItems(changes);
     const autoExpandBundles = displayItems.length <= AUTO_EXPAND_MAX_ITEMS;
+    const autoExpandCategories = changes.length <= AUTO_COLLAPSE_CATEGORIES_THRESHOLD;
     const groups = new Map();
     const groupTotals = new Map();
     changes.forEach(entry => {
@@ -658,7 +831,7 @@ function renderFileSections() {
         const section = document.createElement('section');
         section.className = 'component-group';
         const categoryKey = `category:${group}`;
-        const categoryOpen = isGroupExpanded(categoryKey, true);
+        const categoryOpen = isGroupExpanded(categoryKey, autoExpandCategories);
         const headingRow = document.createElement('div');
         headingRow.className = 'component-group-header-row';
         const heading = document.createElement('button');
@@ -674,11 +847,14 @@ function renderFileSections() {
         count.className = 'component-group-count';
         const groupLineTotals = groupTotals.get(group);
         count.textContent = String(groupLineTotals.files);
-        const lineSummary = createLineChangeSummary(groupLineTotals.added, groupLineTotals.removed);
-        heading.append(chevron, headingLabel, count, lineSummary);
+        heading.append(chevron, headingLabel, count);
         heading.title = categoryOpen ? `Hide ${group}` : `Show ${group}`;
-        heading.addEventListener('click', () => toggleGroup(categoryKey, true));
+        heading.addEventListener('click', () => toggleGroup(categoryKey, autoExpandCategories));
         headingRow.appendChild(heading);
+        const groupPaths = entries.flatMap(item => item.entries.map(([file]) => file.filePath));
+        headingRow.appendChild(createUseFilesButton(groupPaths, group, 'component-group-use-btn'));
+        const groupLineSummary = createLineChangeSummary(groupLineTotals.added, groupLineTotals.removed);
+        if (groupLineSummary) headingRow.appendChild(groupLineSummary);
         if (entries.length > 1) {
             const sortSelect = document.createElement('select');
             sortSelect.className = 'component-sort-select';
@@ -719,6 +895,8 @@ function renderFileSections() {
                     bundle.className = 'component-bundle';
                     const bundleKey = item.key;
                     const bundleOpen = isGroupExpanded(bundleKey, autoExpandBundles);
+                    const bundleHeadingRow = document.createElement('div');
+                    bundleHeadingRow.className = 'component-bundle-heading-row';
                     const bundleHeading = document.createElement('button');
                     bundleHeading.type = 'button';
                     bundleHeading.className = 'component-bundle-heading';
@@ -727,22 +905,25 @@ function renderFileSections() {
                     bundleChevron.className = 'group-chevron';
                     bundleChevron.textContent = bundleOpen ? '▾' : '▸';
                     const bundleName = document.createElement('strong');
+                    bundleName.className = 'component-bundle-name';
                     bundleName.textContent = item.componentName;
                     const bundleStatuses = createBundleStatusBadges(item.entries);
-                    const bundleMeta = document.createElement('span');
-                    bundleMeta.className = 'component-bundle-meta';
                     const bundleCount = document.createElement('span');
                     bundleCount.className = 'component-bundle-count';
                     const totalBundleFiles = item.entries.length;
-                    bundleCount.textContent = `${totalBundleFiles} ${totalBundleFiles === 1 ? 'file' : 'files'} changed`;
+                    bundleCount.textContent = `${totalBundleFiles} ${totalBundleFiles === 1 ? 'file' : 'files'}`;
+                    bundleCount.title = `${totalBundleFiles} changed ${totalBundleFiles === 1 ? 'file' : 'files'} in this component`;
                     const bundleLineTotals = summarizeLines(item.entries);
                     const bundleLineSummary = createLineChangeSummary(bundleLineTotals.added, bundleLineTotals.removed);
-                    bundleLineSummary.classList.add('component-bundle-line-summary');
-                    bundleHeading.append(bundleChevron, bundleName, bundleStatuses, bundleLineSummary, bundleMeta);
-                    bundleMeta.append(bundleCount);
+                    if (bundleLineSummary) bundleLineSummary.classList.add('component-bundle-line-summary');
+                    bundleHeading.append(bundleChevron, bundleName, bundleCount, bundleStatuses);
+                    if (bundleLineSummary) bundleHeading.appendChild(bundleLineSummary);
                     bundleHeading.title = bundleOpen ? `Hide files in ${item.componentName}` : `Show files in ${item.componentName}`;
                     bundleHeading.addEventListener('click', () => toggleGroup(bundleKey, autoExpandBundles));
-                    bundle.appendChild(bundleHeading);
+                    bundleHeadingRow.appendChild(bundleHeading);
+                    const bundlePaths = item.entries.map(([file]) => file.filePath);
+                    bundleHeadingRow.appendChild(createUseFilesButton(bundlePaths, item.componentName, 'component-bundle-use-btn'));
+                    bundle.appendChild(bundleHeadingRow);
                     if (bundleOpen) {
                         const bundleFiles = document.createElement('div');
                         bundleFiles.className = 'component-bundle-files';
@@ -810,7 +991,6 @@ function renderGlobalActions() {
     const differentFromBase = [...state.addedFiles, ...state.changedFiles, ...state.deletedFiles];
     const staged = state.status?.staged ?? [];
     const unstaged = state.status?.unstaged ?? [];
-
     let buttons = '';
     if (differentFromBase.length > 0) {
         buttons += button('global-accept-btn', 'Use all from ' + state.targetBranch, tips.useAll());
@@ -830,6 +1010,9 @@ function renderGlobalActions() {
     if (state.hasReport) {
         buttons += button('global-report-btn', 'Save Report', tips.saveReport);
     }
+    if (state.hasPackageXml) {
+        buttons += button('global-package-xml-btn', 'Save Salesforce package.xml', tips.savePackageXml);
+    }
     globalActions.innerHTML = buttons;
 
     const bind = (selector, command) => {
@@ -842,10 +1025,12 @@ function renderGlobalActions() {
     bind('.global-revert-btn', 'revertAll');
     bind('.global-restore-btn', 'restoreAll');
     bind('.global-report-btn', 'saveReport');
+    bind('.global-package-xml-btn', 'savePackageXml');
 }
 
 function render() {
     renderSummary();
+    renderComponentFilters();
     renderFileSections();
     renderGlobalActions();
 }
@@ -959,9 +1144,11 @@ function showResult(message) {
     }
 
     const isError = message.kind === 'error';
-    resultBanner.className = isError ? 'result-error' : 'result-success';
+    const icons = { error: '✕', warning: '!', success: '✓' };
+    const kind = message.kind === 'error' || message.kind === 'warning' ? message.kind : 'success';
+    resultBanner.className = `result-${kind}`;
     resultBanner.innerHTML = `
-        <span class="result-icon">${isError ? '✕' : '✓'}</span>
+        <span class="result-icon">${icons[kind]}</span>
         <span class="result-text">${escapeHtml(message.text)}</span>
         ${!isError && message.undoPaths && message.undoPaths.length > 0
             ? button('result-undo-btn', 'Undo', 'Put the files back exactly as they were before this action.')
@@ -995,6 +1182,45 @@ function showResult(message) {
     }
 }
 
+function queueOrdinal(position) {
+    const lastTwo = position % 100;
+    const suffix = lastTwo >= 11 && lastTwo <= 13
+        ? 'th'
+        : ({ 1: 'st', 2: 'nd', 3: 'rd' }[position % 10] || 'th');
+    return `${position}${suffix}`;
+}
+
+function showQueue(message) {
+    rowElements.forEach(row => row.querySelectorAll('.row-queue-indicator').forEach(indicator => indicator.remove()));
+    const items = message.items || [];
+    items.forEach(item => {
+        if (!item.path) return;
+        const row = rowElements.get(item.path);
+        const stats = row?.querySelector('.d2h-file-stats');
+        if (!stats) return;
+        const indicator = document.createElement('span');
+        indicator.className = 'row-queue-indicator';
+        indicator.textContent = `${queueOrdinal(item.position)} in queue`;
+        indicator.title = `${item.label} is waiting for earlier actions to finish.`;
+        stats.prepend(indicator);
+    });
+
+    if (!message.pending) {
+        queueBanner.hidden = true;
+        queueBanner.textContent = '';
+        return;
+    }
+    const count = message.pending;
+    const noun = count === 1 ? 'action' : 'actions';
+    const next = items.slice(0, 3).map(item => {
+        const file = item.path ? ` (${getFileName(item.path)})` : '';
+        return `${queueOrdinal(item.position)}: ${item.label}${file}`;
+    });
+    const more = items.length > next.length ? `, and ${items.length - next.length} more` : '';
+    queueBanner.textContent = `${count} ${noun} queued${message.active ? ' behind the current action' : ' and waiting to run'}: ${next.join('; ')}${more}.`;
+    queueBanner.hidden = false;
+}
+
 // --- 9. Messages from the extension ---
 window.addEventListener('message', event => {
     const message = event.data;
@@ -1005,6 +1231,8 @@ window.addEventListener('message', event => {
         showBusy(message);
     } else if (message.command === 'idle') {
         hideBusy();
+    } else if (message.command === 'queue') {
+        showQueue(message);
     } else if (message.command === 'result') {
         showResult(message);
     }

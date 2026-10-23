@@ -32,7 +32,16 @@ export function throwIfAborted(signal?: AbortSignal): void {
 }
 
 export function isAbortError(error: unknown): boolean {
-    return error instanceof Error && error.name === 'AbortError';
+    if (!(error instanceof Error)) {
+        return false;
+    }
+    // Our own AbortError, or simple-git killing the process because its abort signal fired.
+    return error.name === 'AbortError' || (error as { plugin?: string }).plugin === 'abort';
+}
+
+/** True when a Git command was killed for producing no output for too long (simple-git's block timeout). */
+export function isGitTimeoutError(error: unknown): boolean {
+    return error instanceof Error && (error as { plugin?: string }).plugin === 'timeout';
 }
 
 /** Lets the event loop run (progress messages, cancellation) during long synchronous loops. */

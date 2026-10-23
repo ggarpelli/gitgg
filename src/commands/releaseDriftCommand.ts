@@ -3,7 +3,8 @@ import { GitService } from '../services/gitService';
 import { pickBranchWithFavorites } from '../ui/branchPicker';
 import { resolveGitService } from '../ui/repo';
 import { DiffPanel } from '../views/diffPanel';
-import { compareWithProgress } from '../ui/feedback';
+import { compareWithProgress, runCancellable } from '../ui/feedback';
+import { throwIfAborted } from '../utils/concurrency';
 
 const FAVORITE_COMMITS_KEY = 'favoriteCommits';
 const StarIcon = new vscode.ThemeIcon('star-full');
@@ -33,10 +34,10 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
         location: vscode.ProgressLocation.Notification,
         title: 'Gitgg: Detecting drift...',
         cancellable: true
-    }, async (progress, token) => {
+    }, async (progress, token) => runCancellable(token, async signal => {
         const [changedFiles, commitMessage] = await Promise.all([
-            git.getChangedFilesInCommit(sha),
-            git.getCommitMessage(sha)
+            git.getChangedFilesInCommit(sha, signal),
+            git.getCommitMessage(sha, signal)
         ]);
         if (changedFiles.length === 0) {
             vscode.window.showInformationMessage(`Gitgg: Commit ${sha.substring(0, 7)} does not change any file.`);
@@ -44,10 +45,8 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
         }
 
         const filePaths = changedFiles.map(file => file.path);
-        const comparison = await compareWithProgress(git, sha, filePaths, progress, token);
-        if (token.isCancellationRequested) {
-            return;
-        }
+        const comparison = await compareWithProgress(git, sha, filePaths, progress, signal);
+        throwIfAborted(signal);
 
         await DiffPanel.open(context, git, {
             viewType: 'gitgg-drift-view',
@@ -58,7 +57,7 @@ export async function runReleaseDriftCommand(context: vscode.ExtensionContext, c
             filePaths,
             initialComparison: comparison
         });
-    });
+    }));
 }
 
 async function pickCommit(context: vscode.ExtensionContext, git: GitService): Promise<string | undefined> {

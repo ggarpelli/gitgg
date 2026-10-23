@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getConfig } from '../config';
-import { compareWithProgress } from '../ui/feedback';
+import { compareWithProgress, runCancellable } from '../ui/feedback';
+import { throwIfAborted } from '../utils/concurrency';
 import { pickBranchWithFavorites } from '../ui/branchPicker';
 import { resolveGitService } from '../ui/repo';
 import { DiffPanel } from '../views/diffPanel';
@@ -39,19 +40,17 @@ export async function runCompareBranchesCommand(context: vscode.ExtensionContext
         location: vscode.ProgressLocation.Notification,
         title: 'Gitgg: Comparing branches...',
         cancellable: true
-    }, async (progress, token) => {
+    }, async (progress, token) => runCancellable(token, async signal => {
         progress.report({ message: `Resolving '${targetBranch}'...` });
-        const target = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare);
+        const target = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare, signal);
         if (target.warning) {
             vscode.window.showWarningMessage(`Gitgg: ${target.warning}`);
         }
-        if (token.isCancellationRequested) {
-            return;
-        }
+        throwIfAborted(signal);
 
         progress.report({ message: 'Getting changed files...' });
-        const changedPaths = await git.getChangedFilesBetweenRefs(target.ref, 'HEAD');
-        const workingTreePaths = (await git.getStatus()).files.map(file => file.path);
+        const changedPaths = await git.getChangedFilesBetweenRefs(target.ref, 'HEAD', signal);
+        const workingTreePaths = (await git.getStatus(signal)).files.map(file => file.path);
         const filePaths = Array.from(new Set([...changedPaths, ...workingTreePaths])).sort((left, right) => left.localeCompare(right));
         if (filePaths.length === 0) {
             vscode.window.showInformationMessage(`Gitgg: No differences between ${currentBranch} and ${targetBranch}.`);
@@ -60,10 +59,8 @@ export async function runCompareBranchesCommand(context: vscode.ExtensionContext
 
         const hasWorkingTreeChanges = workingTreePaths.some(filePath => filePaths.includes(filePath));
         const localLabel = hasWorkingTreeChanges ? `${currentBranch} (working tree)` : currentBranch;
-        const comparison = await compareWithProgress(git, target.ref, filePaths, progress, token);
-        if (token.isCancellationRequested) {
-            return;
-        }
+        const comparison = await compareWithProgress(git, target.ref, filePaths, progress, signal);
+        throwIfAborted(signal);
 
         await DiffPanel.open(context, git, {
             viewType: 'gitgg-branch-comparison-view',
@@ -75,5 +72,5 @@ export async function runCompareBranchesCommand(context: vscode.ExtensionContext
             filePaths,
             initialComparison: comparison
         });
-    });
+    }));
 }

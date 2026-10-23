@@ -34,7 +34,7 @@ class RefContentProvider implements vscode.TextDocumentContentProvider {
         if (!ref) {
             return '';
         }
-        const content = await new GitService(repo).getFileContent(ref, filePath);
+        const content = await GitService.forRepo(repo).getFileContent(ref, filePath);
         return content ?? '';
     }
 }

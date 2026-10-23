@@ -39,7 +39,7 @@ export async function runExportPRSnapshotCommand(context: vscode.ExtensionContex
             const cancellation = token.onCancellationRequested(() => abortController.abort());
             progress.report({ message: 'Getting changed files...' });
             try {
-                const target = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare);
+                const target = await git.resolveBranchRef(targetBranch, config.fetchBeforeCompare, abortController.signal);
                 if (target.warning) {
                     vscode.window.showWarningMessage(`Gitgg: ${target.warning}`);
                 }
@@ -47,7 +47,7 @@ export async function runExportPRSnapshotCommand(context: vscode.ExtensionContex
                     return;
                 }
 
-                const changedFiles = await git.getChangedFilesBetweenRefs(target.ref, promotionBranch);
+                const changedFiles = await git.getChangedFilesBetweenRefs(target.ref, promotionBranch, abortController.signal);
                 if (changedFiles.length === 0) {
                     vscode.window.showInformationMessage('Gitgg: No files changed between the branches.');
                     return;

@@ -117,6 +117,16 @@ body {
     border-color: var(--vscode-focusBorder);
 }
 
+.status-button:disabled {
+    opacity: .45;
+    cursor: default;
+}
+
+.status-button:disabled:hover {
+    background-color: var(--vscode-editorWidget-background);
+    border-color: var(--vscode-sideBar-border);
+}
+
 .truncated-message {
     padding: .5rem;
     text-align: center;
@@ -168,12 +178,30 @@ body {
     color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
 }
 
+.global-package-xml-btn {
+    padding: .5rem .75rem;
+    font: inherit;
+    font-size: .875rem;
+    line-height: 1.25;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    border-radius: .3rem;
+    transition: background-color 0.2s;
+    background-color: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+}
+
 .global-accept-btn:hover,
 .global-stage-btn:hover,
 .global-revert-btn:hover,
 .global-unstage-btn:hover,
 .global-restore-btn:hover,
 .global-report-btn:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.global-package-xml-btn:hover {
     background-color: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
 }
 
@@ -336,7 +364,8 @@ body .d2h-icon {
     display: flex;
     align-items: center;
     gap: .5rem;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     margin: 0;
     padding: .35rem .4rem .6rem;
     border-bottom: 0;
@@ -350,6 +379,21 @@ body .d2h-icon {
     font-weight: 650;
     text-align: left;
     cursor: pointer;
+}
+
+.component-group-header-row:has(.component-group-heading[aria-expanded="true"]) {
+    background-color: var(--vscode-list-hoverBackground);
+    border-radius: .35rem;
+}
+
+.component-group-use-btn {
+    flex: 0 0 auto;
+    margin: 0 .25rem .25rem 0;
+    min-width: 6rem;
+}
+
+.component-group-header-row > .line-change-summary {
+    margin: 0 .25rem .25rem 0;
 }
 
 .component-sort-select {
@@ -376,13 +420,26 @@ body .d2h-icon {
 
 .group-chevron {
     display: inline-block;
-    width: 1rem;
-    color: var(--vscode-descriptionForeground);
+    flex: 0 0 1.15rem;
+    width: 1.15rem;
+    color: var(--vscode-foreground, var(--vscode-editor-foreground));
+    font-size: 1.1rem;
+    font-weight: 700;
+    line-height: 1;
     text-align: center;
 }
 
 .component-group-content {
     padding: 0 .2rem;
+}
+
+.component-group-content > .d2h-file-wrapper {
+    margin-bottom: .4rem;
+}
+
+.component-group-content > .d2h-file-wrapper .d2h-file-header {
+    gap: .35rem .6rem;
+    padding: .4rem .6rem;
 }
 
 .component-bundle {
@@ -407,9 +464,31 @@ body .d2h-icon {
     cursor: pointer;
 }
 
+.component-bundle-heading-row {
+    display: flex;
+    align-items: stretch;
+    gap: .35rem;
+}
+
+.component-bundle-heading-row .component-bundle-heading {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+}
+
+.component-bundle-use-btn {
+    flex: 0 0 auto;
+    align-self: center;
+    min-width: 6rem;
+    margin: .25rem .45rem .25rem 0;
+}
+
 .component-bundle-heading[aria-expanded="true"] {
     border-bottom: 1px solid var(--vscode-sideBar-border);
     border-radius: .4rem .4rem 0 0;
+    border-left: 3px solid var(--vscode-textLink-foreground);
+    padding-left: calc(.75rem - 3px);
+    background-color: var(--vscode-editorWidget-background);
 }
 
 .component-bundle-heading .group-chevron {
@@ -417,16 +496,21 @@ body .d2h-icon {
 }
 
 .component-bundle-count {
-    color: var(--vscode-descriptionForeground);
-    font-size: .8rem;
+    flex: 0 0 auto;
+    padding: .15rem .45rem;
+    border-radius: 999px;
+    background-color: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    font-size: .72rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
-.component-bundle-meta {
-    display: flex;
-    align-items: center;
-    gap: .8rem;
-    flex: 0 0 auto;
-    margin-left: auto;
+.component-bundle-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .component-bundle-line-summary {
@@ -457,7 +541,22 @@ body .d2h-icon {
 }
 
 .component-bundle-files {
-    padding: .55rem;
+    margin-left: .6rem;
+    padding: .3rem .4rem .2rem .55rem;
+    border-left: 2px solid var(--vscode-sideBar-border);
+}
+
+.component-bundle-files > .d2h-file-wrapper {
+    margin-bottom: .3rem;
+}
+
+.component-bundle-files > .d2h-file-wrapper:last-child {
+    margin-bottom: 0;
+}
+
+.component-bundle-files > .d2h-file-wrapper .d2h-file-header {
+    gap: .3rem .5rem;
+    padding: .35rem .55rem;
 }
 
 .object-source-folder {
@@ -684,6 +783,44 @@ body .d2h-icon {
     font: inherit;
 }
 
+#component-filters {
+    display: flex;
+    flex: 1 1 28rem;
+    align-items: center;
+    gap: .3rem;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+}
+
+#component-filters[hidden] {
+    display: none;
+}
+
+.component-filter-chip {
+    flex: 0 0 auto;
+    padding: .3rem .55rem;
+    border: 1px solid var(--vscode-sideBar-border);
+    border-radius: 1rem;
+    background: var(--vscode-editorWidget-background);
+    color: var(--vscode-descriptionForeground);
+    font: inherit;
+    font-size: .8rem;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.component-filter-chip:hover {
+    border-color: var(--vscode-focusBorder);
+    color: var(--vscode-editor-foreground);
+}
+
+.component-filter-chip.active {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+}
+
 #search::placeholder {
     color: var(--vscode-input-placeholderForeground);
 }
@@ -693,7 +830,7 @@ body .d2h-icon {
     color: var(--vscode-descriptionForeground);
 }
 
-/* Shown while an action runs; buttons are disabled meanwhile */
+/* Shown while an action runs; the rest of the panel stays interactive. */
 #busy-banner {
     position: sticky;
     top: 3.25rem;
@@ -722,9 +859,13 @@ body .d2h-icon {
     to { transform: rotate(360deg); }
 }
 
-body.busy button {
-    opacity: 0.5;
-    pointer-events: none;
+#queue-banner {
+    margin-bottom: 8px;
+    padding: .4rem .75rem;
+    border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+    background-color: var(--vscode-editorWidget-background);
+    color: var(--vscode-descriptionForeground);
+    font-size: .875rem;
 }
 
 .section-toggle {
@@ -855,10 +996,13 @@ body.busy button {
     background-color: var(--vscode-editor-background);
 }
 
-/* Single-file actions: spinner on the row, only that row is disabled */
-.row-busy .d2h-file-stats button {
-    opacity: 0.5;
-    pointer-events: none;
+/* Single-file actions: show a spinner on the active row while keeping its actions queueable. */
+.row-queue-indicator {
+    margin-right: .5rem;
+    color: var(--vscode-editorWarning-foreground, #cca700);
+    font-size: .8rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .row-spinner {
@@ -904,6 +1048,11 @@ body.busy button {
         flex-basis: 100%;
     }
 
+    #component-filters {
+        flex-basis: 100%;
+        order: 3;
+    }
+
     #summary-container {
         grid-template-columns: 1fr;
     }
@@ -936,9 +1085,8 @@ body.busy button {
         flex-wrap: wrap;
     }
 
-    .component-bundle-meta {
-        width: 100%;
-        justify-content: flex-end;
+    .component-bundle-heading-row {
+        flex-wrap: wrap;
     }
 
     .diff-side-label {
@@ -946,4 +1094,22 @@ body.busy button {
         flex-direction: column;
         gap: .15rem;
     }
+}
+
+/* Warning banner: an action that was refused or had nothing to do */
+#result-banner.result-warning {
+    border-left-color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.result-warning .result-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font-size: 0.8em;
+    font-weight: bold;
+    color: var(--vscode-editor-background);
+    background-color: var(--vscode-editorWarning-foreground, #cca700);
 }

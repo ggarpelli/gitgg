@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-10-23
+
+### Added
+- 🔢 **File progress for bulk actions**: Stage, Unstage, Use, Revert and Restore show completed files against the total.
+- ➕ **Salesforce component filters and Use actions**: select multiple metadata types and apply the compared branch's version to a whole category or component bundle.
+- 📦 **On-demand Salesforce package.xml**: save a Salesforce Metadata API manifest from PR Comparison when needed; it is explicitly labeled as Salesforce-specific.
+
+### Changed
+- 🧭 **Large comparison layout**: categories with more than 200 changed files start collapsed; component bundles and standalone files use a more compact layout. Type filters are hidden when the comparison contains only one type.
+- 🆕 **New file status**: new files are labeled "New" instead of "Added", and zero line counts are omitted.
+
+### Fixed
+- 🧊 **Comparison cancellation and large-file diffs**: Cancel stops the active Git process, and oversized files fall back to the full diff editor instead of blocking the panel.
+- ⏱️ **Git commands no longer hang indefinitely**: commands time out and report a clear message when Git is blocked.
+- 🖱️ **Panel actions queue in click order**: additional Use, Stage, Unstage, Revert and Restore actions show their place in the queue.
+- 💬 **Clear feedback for no-op actions**: the panel explains when there is nothing to stage, unstage, use, revert or restore.
+- 🏷️ **Confirmation names the compared branch** instead of using the generic "Use Branch Version" label.
+- ♻️ **One Git client per repository** keeps the concurrent-process limit effective across commands and panels.
+
+---
+
 ## [0.2.4] - 2026-10-21
 
 ### Added

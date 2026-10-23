@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { simpleGit, type SimpleGit } from 'simple-git';
 import { GitService } from '../../services/gitService';
+import { isAbortError } from '../../utils/concurrency';
 
 suite('GitService (real repository)', function () {
     this.timeout(30000);
@@ -191,6 +192,33 @@ suite('GitService (real repository)', function () {
             service.compareWithWorkingTree(sha, names, { signal: controller.signal }),
             (error: Error) => error.name === 'AbortError'
         );
+    });
+
+    test('forRepo reuses one instance per repository', () => {
+        assert.strictEqual(GitService.forRepo(repoPath), GitService.forRepo(repoPath));
+        assert.notStrictEqual(GitService.forRepo(repoPath), GitService.forRepo(os.tmpdir()));
+    });
+
+    test('an aborted signal stops Git commands instead of letting them finish in the background', async () => {
+        write('file.txt', 'x\n');
+        const sha = await commit('base');
+        const aborted = AbortSignal.abort();
+
+        // Every command the UI can be left waiting on must honour the signal.
+        for (const run of [
+            () => service.getStatus(aborted),
+            () => service.getChangedFilesBetweenRefs(sha, 'HEAD', aborted),
+            () => service.getChangedFilesInCommit(sha, aborted),
+            () => service.resolveBranchRef('main', true, aborted)
+        ]) {
+            await assert.rejects(run(), (error: Error) => {
+                assert.ok(isAbortError(error), `expected an abort error, got: ${error.message}`);
+                return true;
+            });
+        }
+
+        // Without a signal the same commands still work.
+        assert.deepStrictEqual((await service.getStatus()).files, []);
     });
 
     test('getFileBuffer keeps binary content intact', async () => {

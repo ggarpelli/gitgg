@@ -1,12 +1,20 @@
-import { simpleGit, type SimpleGit, type StatusResult } from 'simple-git';
+import { simpleGit, type SimpleGit, type SimpleGitOptions, type StatusResult } from 'simple-git';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildPatch, ChangeKind, classifyChange, parseNameStatus, NameStatusEntry } from '../utils/patch';
-import { createAbortError, mapWithConcurrency, throwIfAborted, yieldToEventLoop } from '../utils/concurrency';
+import { createAbortError, isAbortError, mapWithConcurrency, throwIfAborted, yieldToEventLoop } from '../utils/concurrency';
 
 /** Parallel file system reads; high enough to be fast, low enough to avoid "too many open files". */
 const FS_CONCURRENCY = 32;
+const PROGRESS_PATH_BATCH_SIZE = 200;
+
+/**
+ * A Git command that produces no output for this long is killed and reported as an error.
+ * Without it a command blocked on a repository lock (by a fetch or a background `gc`, for example)
+ * would hang forever and take the UI that is waiting on it with it.
+ */
+const GIT_BLOCK_TIMEOUT_MS = 120000;
 
 /** Hash of Git's empty tree, used as the "parent" of a root commit. */
 const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
@@ -40,13 +48,46 @@ export interface CommitSummary {
 }
 
 export class GitService {
-    private git: SimpleGit;
+    private readonly git: SimpleGit;
     private readonly repoPath: string;
+    private readonly options: Partial<SimpleGitOptions>;
 
     constructor(repoPath: string) {
         this.repoPath = repoPath;
-        this.git = simpleGit({ baseDir: repoPath, binary: 'git', maxConcurrentProcesses: 6 });
+        this.options = {
+            baseDir: repoPath,
+            binary: 'git',
+            maxConcurrentProcesses: 6,
+            timeout: { block: GIT_BLOCK_TIMEOUT_MS }
+        };
+        this.git = simpleGit(this.options);
     }
+
+    /**
+     * A client bound to `signal`, so aborting kills the running Git process instead of letting it
+     * finish in the background. Long or remote operations (fetch, status, diff) go through this.
+     */
+    private client(signal?: AbortSignal): SimpleGit {
+        return signal ? simpleGit({ ...this.options, abort: signal }) : this.git;
+    }
+
+    /**
+     * One instance per repository, shared by every command, panel and diff tab.
+     * Each instance caps its own concurrent Git processes, so reusing it keeps that cap meaningful
+     * instead of letting each caller start its own batch of processes.
+     */
+    static forRepo(repoPath: string): GitService {
+        const normalizedPath = path.resolve(repoPath);
+        const key = process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath;
+        let service = GitService.instances.get(key);
+        if (!service) {
+            service = new GitService(repoPath);
+            GitService.instances.set(key, service);
+        }
+        return service;
+    }
+
+    private static readonly instances = new Map<string, GitService>();
 
     /**
      * Returns the root of the Git repository that contains `startPath` (a file or folder),
@@ -64,7 +105,7 @@ export class GitService {
         }
 
         try {
-            const root = await simpleGit({ baseDir: dir }).revparse(['--show-toplevel']);
+            const root = await simpleGit({ baseDir: dir, timeout: { block: GIT_BLOCK_TIMEOUT_MS } }).revparse(['--show-toplevel']);
             return root.trim() ? path.normalize(root.trim()) : undefined;
         } catch {
             return undefined;
@@ -105,13 +146,17 @@ export class GitService {
         return Array.from(names);
     }
 
-    async refExists(ref: string): Promise<boolean> {
+    async refExists(ref: string, signal?: AbortSignal): Promise<boolean> {
+        throwIfAborted(signal);
         try {
             // With --quiet Git exits non-zero without writing to stderr, which simple-git does not treat
             // as an error, so the empty output is what signals a missing ref.
-            const sha = await this.git.raw(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+            const sha = await this.client(signal).raw(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
             return sha.trim().length > 0;
-        } catch {
+        } catch (error) {
+            if (isAbortError(error)) {
+                throw error;
+            }
             return false;
         }
     }
@@ -120,20 +165,27 @@ export class GitService {
      * Picks the best ref for a branch: `origin/<branch>` when it exists (optionally fetching it first),
      * otherwise the local branch.
      */
-    async resolveBranchRef(branch: string, fetchFirst: boolean): Promise<ResolvedRef> {
+    async resolveBranchRef(branch: string, fetchFirst: boolean, signal?: AbortSignal): Promise<ResolvedRef> {
+        throwIfAborted(signal);
         let fetchFailed = false;
         if (fetchFirst) {
-            const remotes = await this.git.getRemotes();
+            const git = this.client(signal);
+            const remotes = await git.getRemotes();
             if (remotes.some(remote => remote.name === 'origin')) {
                 try {
-                    await this.git.fetch('origin', branch);
-                } catch {
+                    await git.fetch('origin', branch);
+                } catch (error) {
+                    // A cancelled fetch must stop the whole command, not fall back to a stale ref.
+                    throwIfAborted(signal);
+                    if (isAbortError(error)) {
+                        throw error;
+                    }
                     fetchFailed = true;
                 }
             }
         }
 
-        if (await this.refExists(`refs/remotes/origin/${branch}`)) {
+        if (await this.refExists(`refs/remotes/origin/${branch}`, signal)) {
             return {
                 ref: `origin/${branch}`,
                 warning: fetchFailed ? `Could not fetch '${branch}' from origin. Using the last fetched version, which may be outdated.` : undefined
@@ -147,8 +199,8 @@ export class GitService {
         return result.trim();
     }
 
-    async getCommitMessage(sha: string): Promise<string> {
-        const message = await this.git.show(['--format=%s', '-s', sha]);
+    async getCommitMessage(sha: string, signal?: AbortSignal): Promise<string> {
+        const message = await this.client(signal).show(['--format=%s', '-s', sha]);
         return message.trim();
     }
 
@@ -301,61 +353,77 @@ export class GitService {
     }
 
     /** Files touched by a commit, compared with its first parent (works for merges and root commits). */
-    async getChangedFilesInCommit(sha: string): Promise<NameStatusEntry[]> {
-        const parents = (await this.git.raw(['rev-list', '--parents', '-n', '1', sha])).trim().split(/\s+/).slice(1);
+    async getChangedFilesInCommit(sha: string, signal?: AbortSignal): Promise<NameStatusEntry[]> {
+        const git = this.client(signal);
+        const parents = (await git.raw(['rev-list', '--parents', '-n', '1', sha])).trim().split(/\s+/).slice(1);
         const base = parents[0] ?? EMPTY_TREE_SHA;
-        const output = await this.git.raw(['diff', '--name-status', '-M', base, sha]);
+        const output = await git.raw(['diff', '--name-status', '-M', base, sha]);
         return parseNameStatus(output);
     }
 
-    async getChangedFilesBetweenRefs(fromRef: string, toRef: string): Promise<string[]> {
+    async getChangedFilesBetweenRefs(fromRef: string, toRef: string, signal?: AbortSignal): Promise<string[]> {
         // Keep both paths of a rename so callers can represent it as a deletion plus an addition.
-        const output = await this.git.raw(['diff', '--name-only', '--no-renames', fromRef, toRef]);
+        const output = await this.client(signal).raw(['diff', '--name-only', '--no-renames', fromRef, toRef]);
         return output.split('\n').map(line => line.trim()).filter(Boolean);
     }
 
     // ---------- Index / working tree operations ----------
 
-    async getStatus(): Promise<StatusResult> {
-        return this.git.status();
+    async getStatus(signal?: AbortSignal): Promise<StatusResult> {
+        return this.client(signal).status();
     }
 
     /** Stages files exactly as they are on disk (including deletions). */
-    async stageFiles(filePaths: string[]): Promise<void> {
-        await this.runWithPathspecs(['add', '-A'], filePaths);
+    async stageFiles(filePaths: string[], onProgress?: (done: number, total: number) => void): Promise<void> {
+        await this.runWithPathspecs(['add', '-A'], filePaths, onProgress);
     }
 
-    async unstageFiles(filePaths: string[]): Promise<void> {
-        await this.runWithPathspecs(['reset', '-q', 'HEAD'], filePaths);
+    async unstageFiles(filePaths: string[], onProgress?: (done: number, total: number) => void): Promise<void> {
+        await this.runWithPathspecs(['reset', '-q', 'HEAD'], filePaths, onProgress);
     }
 
     /**
      * Brings the version of each file from `ref` into the working tree and stages it
      * (files that do not exist at `ref` are deleted and the deletion is staged).
      */
-    async takeFilesFromRef(ref: string, filePaths: string[]): Promise<void> {
-        await this.checkoutFromRef(ref, filePaths);
+    async takeFilesFromRef(ref: string, filePaths: string[], onProgress?: (done: number, total: number) => void): Promise<void> {
+        await this.checkoutFromRef(ref, filePaths, onProgress);
     }
 
     /**
      * Puts files back exactly as they are in the current branch (HEAD), discarding staged and
      * unstaged changes. Files that do not exist in HEAD are removed from the index and deleted.
      */
-    async revertToHead(filePaths: string[]): Promise<void> {
-        await this.checkoutFromRef('HEAD', filePaths);
+    async revertToHead(filePaths: string[], onProgress?: (done: number, total: number) => void): Promise<void> {
+        await this.checkoutFromRef('HEAD', filePaths, onProgress);
     }
 
     /** `git checkout <ref> -- files` for files that exist at `ref`; the others are removed. */
-    private async checkoutFromRef(ref: string, filePaths: string[]): Promise<void> {
+    private async checkoutFromRef(ref: string, filePaths: string[], onProgress?: (done: number, total: number) => void): Promise<void> {
         if (filePaths.length === 0) {
             return;
         }
         const existing = await this.existingAtRef(ref, filePaths);
-        await this.runWithPathspecs(['checkout', ref], filePaths.filter(filePath => existing.has(filePath)));
-
         const missing = filePaths.filter(filePath => !existing.has(filePath));
-        await this.runWithPathspecs(['rm', '-q', '--cached', '--ignore-unmatch'], missing);
-        await mapWithConcurrency(missing, FS_CONCURRENCY, filePath => fs.promises.rm(this.toAbsolutePath(filePath), { force: true }));
+        const present = filePaths.filter(filePath => existing.has(filePath));
+        if (!onProgress) {
+            await this.runWithPathspecs(['checkout', ref], present);
+            await this.runWithPathspecs(['rm', '-q', '--cached', '--ignore-unmatch'], missing);
+            await mapWithConcurrency(missing, FS_CONCURRENCY, filePath => fs.promises.rm(this.toAbsolutePath(filePath), { force: true }));
+            return;
+        }
+
+        const total = filePaths.length;
+        onProgress(0, total);
+        await this.runWithPathspecs(['checkout', ref], present, done => onProgress(done, total));
+        let completed = present.length;
+        for (let offset = 0; offset < missing.length; offset += PROGRESS_PATH_BATCH_SIZE) {
+            const batch = missing.slice(offset, offset + PROGRESS_PATH_BATCH_SIZE);
+            await this.runWithPathspecs(['rm', '-q', '--cached', '--ignore-unmatch'], batch);
+            await mapWithConcurrency(batch, FS_CONCURRENCY, filePath => fs.promises.rm(this.toAbsolutePath(filePath), { force: true }));
+            completed += batch.length;
+            onProgress(completed, total);
+        }
     }
 
     /** Which of the paths exist as files at `ref` (one `git cat-file --batch-check` process). */
@@ -370,9 +438,26 @@ export class GitService {
      * which avoids the command line length limit on Windows and handles any file name;
      * `--literal-pathspecs` stops names such as `file[1].txt` from being treated as globs.
      */
-    private async runWithPathspecs(args: string[], filePaths: string[]): Promise<void> {
-        if (filePaths.length > 0) {
+    private async runWithPathspecs(
+        args: string[],
+        filePaths: string[],
+        onProgress?: (done: number, total: number) => void
+    ): Promise<void> {
+        if (filePaths.length === 0) {
+            return;
+        }
+
+        if (!onProgress) {
             await this.runGit(['--literal-pathspecs', ...args, '--pathspec-from-file=-', '--pathspec-file-nul'], filePaths.join('\0'));
+            return;
+        }
+
+        const total = filePaths.length;
+        onProgress(0, total);
+        for (let offset = 0; offset < total; offset += PROGRESS_PATH_BATCH_SIZE) {
+            const batch = filePaths.slice(offset, offset + PROGRESS_PATH_BATCH_SIZE);
+            await this.runGit(['--literal-pathspecs', ...args, '--pathspec-from-file=-', '--pathspec-file-nul'], batch.join('\0'));
+            onProgress(offset + batch.length, total);
         }
     }
 
@@ -383,23 +468,56 @@ export class GitService {
                 return;
             }
             const child = spawn('git', args, { cwd: this.repoPath, windowsHide: true });
+            let settled = false;
+            let timeout: NodeJS.Timeout;
+            const cleanup = () => {
+                clearTimeout(timeout);
+                signal?.removeEventListener('abort', onAbort);
+            };
+            const rejectOnce = (error: Error) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                cleanup();
+                reject(error);
+            };
+            const resolveOnce = (output: Buffer) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                cleanup();
+                resolve(output);
+            };
             const onAbort = () => {
                 child.kill();
-                reject(createAbortError());
+                rejectOnce(createAbortError());
             };
             signal?.addEventListener('abort', onAbort, { once: true });
-            child.on('close', () => signal?.removeEventListener('abort', onAbort));
+            timeout = setTimeout(() => {
+                child.kill();
+                const error = new Error(`git ${args[0]} timed out after ${GIT_BLOCK_TIMEOUT_MS}ms.`) as Error & { plugin: string };
+                error.plugin = 'timeout';
+                rejectOnce(error);
+            }, GIT_BLOCK_TIMEOUT_MS);
+            timeout.unref();
             const stdout: Buffer[] = [];
             const stderr: Buffer[] = [];
             child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk));
             child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk));
-            child.on('error', reject);
+            child.stdin.on('error', error => {
+                if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
+                    rejectOnce(error);
+                }
+            });
+            child.on('error', rejectOnce);
             child.on('close', code => {
                 if (code === 0) {
-                    resolve(Buffer.concat(stdout));
+                    resolveOnce(Buffer.concat(stdout));
                 } else {
                     const message = Buffer.concat(stderr).toString('utf8').trim();
-                    reject(new Error(message || `git ${args.join(' ')} failed with exit code ${code}`));
+                    rejectOnce(new Error(message || `git ${args.join(' ')} failed with exit code ${code}`));
                 }
             });
             child.stdin.end(input);

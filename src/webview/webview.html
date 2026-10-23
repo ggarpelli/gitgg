@@ -32,13 +32,15 @@
         <input id="search" type="search" placeholder="Search files by name or path (Ctrl+F)..." title="Filter the list by file name or folder, e.g. AccountService or lwc/payment. Esc clears it." autocomplete="off" spellcheck="false">
         <select id="status-filter" title="Filter files by change status" aria-label="Filter by change status">
             <option value="all">All changes</option>
-            <option value="added">Added</option>
+            <option value="added">New</option>
             <option value="changed">Changed</option>
             <option value="deleted">Deleted</option>
         </select>
+        <div id="component-filters" aria-label="Filter by component type"></div>
         <span id="search-count"></span>
     </div>
     <div id="busy-banner" role="status" aria-live="polite" hidden></div>
+    <div id="queue-banner" role="status" aria-live="polite" hidden></div>
     <div id="result-banner" role="status" aria-live="polite" hidden></div>
 
     <div id="diff-container"></div>

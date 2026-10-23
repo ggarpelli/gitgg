@@ -37,5 +37,5 @@ export async function resolveGitService(hint?: vscode.Uri): Promise<GitService |
         vscode.window.showErrorMessage('Gitgg: Could not find a Git repository. Open a folder that contains a Git repository.');
         return undefined;
     }
-    return new GitService(repoRoot);
+    return GitService.forRepo(repoRoot);
 }
